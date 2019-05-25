@@ -25,17 +25,9 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.UncheckedIOException;
 import java.net.Socket;
-import java.util.Arrays;
-
 
 import static android.app.NotificationManager.IMPORTANCE_HIGH;
-
-
-/**
- * Created by Emil on 25/03/2018.
- */
 
 public class HackerService extends Service {
     private static final String TAG = "AAGateWay";
@@ -119,7 +111,6 @@ public class HackerService extends Service {
         private Pipe wifiToUSBPipe;
 
         private ErrorListener errorListener;
-        private boolean running;
 
         public Connector(UsbAccessory usbAccessory, ErrorListener errorListener) {
             this.usbAccessory = usbAccessory;
@@ -160,8 +151,7 @@ public class HackerService extends Service {
                     usbToWifiPipe.start();
                     wifiToUSBPipe.start();
                 }
-            }
-            catch (Exception e) {
+            } catch (Exception e) {
                 errorListener.onError(e);
             }
         }
@@ -190,12 +180,15 @@ public class HackerService extends Service {
         @Override
         public void run() {
             int read;
-            try (InputStream in = inputStream; OutputStream out = outputStream) {
-                while (running && (read = in.read(buffer)) > -1) {
-                    out.write(buffer, 0, read);
+            try {
+                while (running && (read = inputStream.read(buffer)) > -1) {
+                    outputStream.write(buffer, 0, read);
                 }
             } catch (IOException e) {
-                if (running) errorListener.onError(e);
+                if (running) {
+                    errorListener.onError(e);
+                    kill();
+                }
             }
         }
 
