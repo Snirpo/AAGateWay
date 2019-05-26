@@ -1,4 +1,4 @@
-package uk.co.borconi.emil.aagateway;
+package com.snirpoapps.aausbtowifi;
 
 import android.content.Context;
 import android.content.Intent;
@@ -6,7 +6,6 @@ import android.net.DhcpInfo;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
-import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -34,8 +33,8 @@ public class MainActivity extends AppCompatActivity {
         buttonStartService.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                Intent serviceIntent = new Intent(MainActivity.this, HackerService.class);
-                serviceIntent.setAction(HackerService.ACTION_START);
+                Intent serviceIntent = new Intent(MainActivity.this, ConnectionService.class);
+                serviceIntent.setAction(ConnectionService.ACTION_START);
                 serviceIntent.putExtra("ipAddress", editTextIpAddress.getText().toString());
                 Toast.makeText(MainActivity.this, "Starting Android Auto proxy", Toast.LENGTH_LONG).show();
                 startService(serviceIntent);
@@ -45,7 +44,7 @@ public class MainActivity extends AppCompatActivity {
         buttonStopService.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                Intent serviceIntent = new Intent(MainActivity.this, HackerService.class);
+                Intent serviceIntent = new Intent(MainActivity.this, ConnectionService.class);
                 serviceIntent.putExtra("ipAddress", editTextIpAddress.getText().toString());
                 Toast.makeText(MainActivity.this, "Stopping Android Auto proxy", Toast.LENGTH_LONG).show();
                 stopService(serviceIntent);
@@ -58,7 +57,7 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
 
         Intent paramIntent = getIntent();
-        Intent serviceIntent = new Intent(this, HackerService.class);
+        Intent serviceIntent = new Intent(this, ConnectionService.class);
         if ("android.hardware.usb.action.USB_ACCESSORY_DETACHED".equalsIgnoreCase(paramIntent.getAction())) {
             Toast.makeText(this, "Stopping Android Auto proxy", Toast.LENGTH_LONG).show();
             stopService(serviceIntent);
@@ -71,7 +70,6 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onNewIntent(Intent paramIntent) {
-        Log.i("MainActivity", "Got new intent: " + paramIntent);
         super.onNewIntent(paramIntent);
         setIntent(paramIntent);
     }

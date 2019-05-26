@@ -1,4 +1,4 @@
-package uk.co.borconi.emil.aagateway;
+package com.snirpoapps.aausbtowifi;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -30,11 +30,11 @@ import java.net.Socket;
 
 import static android.app.NotificationManager.IMPORTANCE_HIGH;
 
-public class HackerService extends Service {
+public class ConnectionService extends Service {
     private static final String TAG = "AAGateWay";
-    public static final String ACTION_START = HackerService.class.getName().toLowerCase() + ".action.start";
-    public static final String ACTION_STOP = HackerService.class.getName().toLowerCase() + ".action.stop";
-    private static final String CHANNEL_ONE_ID = "uk.co.borconi.emil.aagateway";
+    public static final String ACTION_START = ConnectionService.class.getName().toLowerCase() + ".action.start";
+    public static final String ACTION_STOP = ConnectionService.class.getName().toLowerCase() + ".action.stop";
+    private static final String CHANNEL_ONE_ID = "com.snirpoapps.aausbtowifi";
     private static final String CHANNEL_ONE_NAME = "Channel One";
 
     private NotificationManager mNotificationManager;
@@ -48,8 +48,8 @@ public class HackerService extends Service {
     }
 
     public class LocalBinder extends Binder {
-        HackerService getService() {
-            return HackerService.this;
+        ConnectionService getService() {
+            return ConnectionService.this;
         }
     }
 
@@ -76,7 +76,7 @@ public class HackerService extends Service {
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         PendingIntent mainIntent = PendingIntent.getActivity(this, 0, intent, 0);
 
-        Intent playIntent = new Intent(this, HackerService.class);
+        Intent playIntent = new Intent(this, ConnectionService.class);
         playIntent.setAction(ACTION_STOP);
         PendingIntent stopIntent = PendingIntent.getService(this, 0,
                 playIntent, 0);
@@ -130,6 +130,9 @@ public class HackerService extends Service {
         stopForeground(true);
         closeQuietly(connection);
         connection = null;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            mNotificationManager.deleteNotificationChannel(CHANNEL_ONE_ID);
+        }
     }
 
     public interface ErrorListener {

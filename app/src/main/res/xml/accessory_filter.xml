@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <null/>
     <usb-accessory manufacturer="Android" model="Android Open Automotive Protocol" />
     <usb-accessory manufacturer="Android" model="Android Auto" />
 </resources>

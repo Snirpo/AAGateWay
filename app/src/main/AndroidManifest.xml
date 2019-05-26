@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="uk.co.borconi.emil.aagateway">
+    package="com.snirpoapps.aausbtowifi">
     <uses-feature android:name="android.hardware.usb"/>
     <uses-feature android:name="android.hardware.usb.accessory"/>
 
@@ -16,7 +16,10 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
-        <activity android:name=".MainActivity" android:launchMode="singleInstance" android:showOnLockScreen="true">
+        <activity
+            android:name="com.snirpoapps.aausbtowifi.MainActivity"
+            android:launchMode="singleInstance"
+            android:showOnLockScreen="true">
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"/>
                 <action android:name="android.hardware.usb.action.USB_ACCESSORY_DETACHED"/>
@@ -26,7 +29,9 @@
             <meta-data android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED" android:resource="@xml/accessory_filter"/>
 
         </activity>
-        <service android:name=".HackerService" android:exported="false">
+        <service
+            android:name="com.snirpoapps.aausbtowifi.ConnectionService"
+            android:exported="false">
 
         </service>
     </application>
