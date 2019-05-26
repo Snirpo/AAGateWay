@@ -35,6 +35,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onClick(View v) {
                 Intent serviceIntent = new Intent(MainActivity.this, HackerService.class);
+                serviceIntent.setAction(HackerService.ACTION_START);
                 serviceIntent.putExtra("ipAddress", editTextIpAddress.getText().toString());
                 Toast.makeText(MainActivity.this, "Starting Android Auto proxy", Toast.LENGTH_LONG).show();
                 startService(serviceIntent);
