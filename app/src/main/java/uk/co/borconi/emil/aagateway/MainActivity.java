@@ -1,6 +1,9 @@
 package uk.co.borconi.emil.aagateway;
 
+import android.content.Context;
 import android.content.Intent;
+import android.net.DhcpInfo;
+import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
@@ -23,6 +26,10 @@ public class MainActivity extends AppCompatActivity {
         editTextIpAddress = findViewById(R.id.editTextIpAddress);
         buttonStartService = findViewById(R.id.buttonStartService);
         buttonStopService = findViewById(R.id.buttonStopService);
+
+        WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        DhcpInfo d = wifi.getDhcpInfo();
+        editTextIpAddress.setText(intToIp(d.gateway));
 
         buttonStartService.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -68,5 +75,10 @@ public class MainActivity extends AppCompatActivity {
         setIntent(paramIntent);
     }
 
-
+    private static String intToIp(int addr) {
+        return ((addr & 0xFF) + "." +
+                ((addr >>>= 8) & 0xFF) + "." +
+                ((addr >>>= 8) & 0xFF) + "." +
+                ((addr >>>= 8) & 0xFF));
+    }
 }

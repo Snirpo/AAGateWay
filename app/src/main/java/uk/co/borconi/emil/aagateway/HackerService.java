@@ -9,8 +9,6 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.hardware.usb.UsbAccessory;
 import android.hardware.usb.UsbManager;
-import android.net.DhcpInfo;
-import android.net.wifi.WifiManager;
 import android.os.Binder;
 import android.os.Build;
 import android.os.Handler;
@@ -32,6 +30,9 @@ import java.net.Socket;
 import static android.app.NotificationManager.IMPORTANCE_HIGH;
 
 public class HackerService extends Service {
+    private static final String CHANNEL_ONE_ID = "uk.co.borconi.emil.aagateway";
+    private static final String CHANNEL_ONE_NAME = "Channel One";
+
     private static final String TAG = "AAGateWay";
     private NotificationManager mNotificationManager;
     private final IBinder mBinder = new LocalBinder();
@@ -53,9 +54,6 @@ public class HackerService extends Service {
     public void onCreate() {
         super.onCreate();
 
-        String CHANNEL_ONE_ID = "uk.co.borconi.emil.aagateway";
-        String CHANNEL_ONE_NAME = "Channel One";
-
         mNotificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             NotificationChannel notificationChannel = new NotificationChannel(CHANNEL_ONE_ID,
@@ -67,15 +65,18 @@ public class HackerService extends Service {
             mNotificationManager.createNotificationChannel(notificationChannel);
         }
 
+        startForeground(1, createNotification("Running..."));
+    }
+
+    private Notification createNotification(String text) {
         Notification.Builder notification = new Notification.Builder(this)
-                .setContentTitle("Android Auto GateWay")
-                .setContentText("Running....")
+                .setContentTitle("Android Auto Gateway")
+                .setContentText(text)
                 .setSmallIcon(R.drawable.aawifi)
                 .setTicker("");
         if (Build.VERSION.SDK_INT >= 26)
             notification.setChannelId(CHANNEL_ONE_ID);
-
-        startForeground(1, notification.build());
+        return notification.build();
     }
 
     @Override
@@ -84,16 +85,16 @@ public class HackerService extends Service {
         Log.d("AAGateWay", "Service Started");
         super.onStartCommand(intent, flags, startId);
         UsbAccessory usbAccessory = intent.getParcelableExtra("accessory");
-        String ipAddress = intent.getParcelableExtra("ipAddress");
+        String ipAddress = intent.getStringExtra("ipAddress");
 
         final Handler handler = new Handler(Looper.getMainLooper());
         connector = new Connector(usbAccessory, ipAddress, new ErrorListener() {
             @Override
-            public void onError(Exception e) {
+            public void onError(final Exception e) {
                 handler.post(new Runnable() {
                     @Override
                     public void run() {
-                        // doe iets
+                        mNotificationManager.notify(1, createNotification("Error " + e.getMessage()));
                     }
                 });
             }
@@ -108,6 +109,8 @@ public class HackerService extends Service {
     }
 
     private class Connector extends Thread implements Closeable {
+        private volatile boolean running = true;
+
         private final UsbAccessory usbAccessory;
         private final String ipAddress;
 
@@ -147,13 +150,6 @@ public class HackerService extends Service {
                     huOutputStream = client.getOutputStream();
                 }
 
-                String ipAddress = this.ipAddress;
-                if (ipAddress == null) {
-                    WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-                    DhcpInfo d = wifi.getDhcpInfo();
-                    ipAddress = intToIp(d.gateway);
-                }
-
                 Socket socket = new Socket(ipAddress, 5277);
                 phoneInputStream = socket.getInputStream();
                 phoneOutputStream = socket.getOutputStream();
@@ -171,7 +167,7 @@ public class HackerService extends Service {
                 usbToWifiPipe.start();
                 wifiToUSBPipe.start();
             } catch (Exception e) {
-                errorListener.onError(e);
+                if (running) errorListener.onError(e);
             } finally {
                 closeQuietly(this);
             }
@@ -179,6 +175,8 @@ public class HackerService extends Service {
 
         @Override
         public void close() throws IOException {
+            running = false;
+
             closeQuietly(usbToWifiPipe);
             closeQuietly(wifiToUSBPipe);
 
@@ -273,13 +271,6 @@ public class HackerService extends Service {
         String aux = new String(hexChars);
         // Log.d("AAGateWay","ByteTohex: " + aux);
         return aux;
-    }
-
-    private static String intToIp(int addr) {
-        return ((addr & 0xFF) + "." +
-                ((addr >>>= 8) & 0xFF) + "." +
-                ((addr >>>= 8) & 0xFF) + "." +
-                ((addr >>>= 8) & 0xFF));
     }
 
 }
