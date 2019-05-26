@@ -19,12 +19,14 @@ import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.util.Log;
 
+import java.io.Closeable;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.ServerSocket;
 import java.net.Socket;
 
 import static android.app.NotificationManager.IMPORTANCE_HIGH;
@@ -82,9 +84,10 @@ public class HackerService extends Service {
         Log.d("AAGateWay", "Service Started");
         super.onStartCommand(intent, flags, startId);
         UsbAccessory usbAccessory = intent.getParcelableExtra("accessory");
+        String ipAddress = intent.getParcelableExtra("ipAddress");
 
         final Handler handler = new Handler(Looper.getMainLooper());
-        connector = new Connector(usbAccessory, new ErrorListener() {
+        connector = new Connector(usbAccessory, ipAddress, new ErrorListener() {
             @Override
             public void onError(Exception e) {
                 handler.post(new Runnable() {
@@ -104,72 +107,107 @@ public class HackerService extends Service {
         void onError(Exception e);
     }
 
-    private class Connector extends Thread {
+    private class Connector extends Thread implements Closeable {
         private final UsbAccessory usbAccessory;
+        private final String ipAddress;
+
+        private InputStream huInputStream = null;
+        private OutputStream huOutputStream = null;
+        private OutputStream phoneOutputStream = null;
+        private InputStream phoneInputStream = null;
+        private ServerSocket serverSocket = null;
 
         private Pipe usbToWifiPipe;
         private Pipe wifiToUSBPipe;
 
         private ErrorListener errorListener;
 
-        public Connector(UsbAccessory usbAccessory, ErrorListener errorListener) {
+        public Connector(UsbAccessory usbAccessory, String ipAddress, ErrorListener errorListener) {
             this.usbAccessory = usbAccessory;
+            this.ipAddress = ipAddress;
             this.errorListener = errorListener;
         }
 
         @Override
         public void run() {
             try {
-                UsbManager usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
-                ParcelFileDescriptor fileDescriptor = usbManager.openAccessory(usbAccessory);
-                if (fileDescriptor == null) {
-                    throw new IllegalArgumentException("Accesory not found!");
+                if (usbAccessory != null) {
+                    UsbManager usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
+                    ParcelFileDescriptor fileDescriptor = usbManager.openAccessory(usbAccessory);
+                    if (fileDescriptor == null) {
+                        throw new IllegalArgumentException("Accesory not found!");
+                    }
+                    FileDescriptor fd = fileDescriptor.getFileDescriptor();
+                    huInputStream = new FileInputStream(fd);
+                    huOutputStream = new FileOutputStream(fd);
+                } else {
+                    serverSocket = new ServerSocket(5277);
+                    Socket client = serverSocket.accept();
+                    huInputStream = client.getInputStream();
+                    huOutputStream = client.getOutputStream();
                 }
-                FileDescriptor fd = fileDescriptor.getFileDescriptor();
 
-                WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-                DhcpInfo d = wifi.getDhcpInfo();
+                String ipAddress = this.ipAddress;
+                if (ipAddress == null) {
+                    WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                    DhcpInfo d = wifi.getDhcpInfo();
+                    ipAddress = intToIp(d.gateway);
+                }
 
-                Socket socket = new Socket(intToIp(d.gateway), 5277);
+                Socket socket = new Socket(ipAddress, 5277);
+                phoneInputStream = socket.getInputStream();
+                phoneOutputStream = socket.getOutputStream();
 
-                //usbInputStream.read(buf);
-                try (
-                        InputStream usbInputStream = new FileInputStream(fd);
-                        OutputStream usbOutputStream = new FileOutputStream(fd);
-                        OutputStream wifiOutputStream = socket.getOutputStream();
-                        InputStream wifiInputStream = socket.getInputStream()
-                ) {
-//                    wifiOutputStream.write(new byte[]{0, 3, 0, 6, 0, 1, 0, 1, 0, 2});
-//                    wifiOutputStream.flush();
-//                    wifiInputStream.read(new byte[12]);
+                //huInputStream.read(buf);
+//                    phoneOutputStream.write(new byte[]{0, 3, 0, 6, 0, 1, 0, 1, 0, 2});
+//                    phoneOutputStream.flush();
+//                    phoneInputStream.read(new byte[12]);
 //
-//                    usbOutputStream.write(new byte[]{0, 3, 0, 8, 0, 2, 0, 1, 0, 4, 0, 0});
+//                    huOutputStream.write(new byte[]{0, 3, 0, 8, 0, 2, 0, 1, 0, 4, 0, 0});
 
-                    usbToWifiPipe = new Pipe(usbInputStream, wifiOutputStream, errorListener);
-                    wifiToUSBPipe = new Pipe(wifiInputStream, usbOutputStream, errorListener);
+                usbToWifiPipe = new Pipe(huInputStream, phoneOutputStream, errorListener);
+                wifiToUSBPipe = new Pipe(phoneInputStream, huOutputStream, errorListener);
 
-                    usbToWifiPipe.start();
-                    wifiToUSBPipe.start();
-                }
+                usbToWifiPipe.start();
+                wifiToUSBPipe.start();
             } catch (Exception e) {
                 errorListener.onError(e);
+            } finally {
+                closeQuietly(this);
             }
         }
 
-        public void kill() {
-            if (usbToWifiPipe != null) usbToWifiPipe.kill();
-            if (wifiToUSBPipe != null) wifiToUSBPipe.kill();
+        @Override
+        public void close() throws IOException {
+            closeQuietly(usbToWifiPipe);
+            closeQuietly(wifiToUSBPipe);
+
+            closeQuietly(serverSocket);
+            closeQuietly(phoneInputStream);
+            closeQuietly(phoneOutputStream);
+            closeQuietly(huInputStream);
+            closeQuietly(huOutputStream);
         }
     }
 
-    private static class Pipe extends Thread {
+    private static void closeQuietly(Closeable closeable) {
+        if (closeable != null) {
+            try {
+                closeable.close();
+            } catch (IOException e) {
+                // ignore
+            }
+        }
+    }
+
+    private static class Pipe extends Thread implements Closeable {
         private ErrorListener errorListener;
 
         private InputStream inputStream;
         private OutputStream outputStream;
 
         private byte[] buffer = new byte[16384];
-        private boolean running = true;
+        private volatile boolean running = true;
 
         public Pipe(InputStream inputStream, OutputStream outputStream, ErrorListener errorListener) {
             this.inputStream = inputStream;
@@ -187,23 +225,13 @@ public class HackerService extends Service {
             } catch (IOException e) {
                 if (running) {
                     errorListener.onError(e);
-                    kill();
                 }
             }
         }
 
-        public void kill() {
+        @Override
+        public void close() {
             running = false;
-            try {
-                inputStream.close();
-            } catch (IOException e) {
-                // ignore
-            }
-            try {
-                outputStream.close();
-            } catch (IOException e) {
-                // ignore
-            }
         }
     }
 
@@ -221,7 +249,7 @@ public class HackerService extends Service {
 //        }
 //
 //        socketinput.readFully(readbuffer, pos, enc_len);
-//        usbOutputStream.write(Arrays.copyOf(readbuffer, enc_len + pos));
+//        huOutputStream.write(Arrays.copyOf(readbuffer, enc_len + pos));
 //
 //
 //    }
@@ -230,7 +258,7 @@ public class HackerService extends Service {
     @Override
     public void onDestroy() {
         mNotificationManager.cancelAll();
-        connector.kill();
+        closeQuietly(connector);
     }
 
     private final static char[] hexArray = "0123456789ABCDEF".toCharArray();
