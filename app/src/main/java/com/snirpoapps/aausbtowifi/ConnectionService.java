@@ -82,7 +82,7 @@ public class ConnectionService extends Service {
                 playIntent, 0);
 
         Notification.Builder notification = new Notification.Builder(this)
-                .setContentTitle("Android Auto Gateway")
+                .setContentTitle("Android Auto USB to Wifi bridge")
                 .setSmallIcon(R.drawable.aawifi)
                 .setContentText(text)
                 .setContentIntent(mainIntent)
