@@ -28,7 +28,8 @@ public class MainActivity extends AppCompatActivity {
 
         WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         DhcpInfo d = wifi.getDhcpInfo();
-        editTextIpAddress.setText(intToIp(d.gateway));
+        //editTextIpAddress.setText(intToIp(d.gateway));
+        editTextIpAddress.setText("192.168.1.123");
 
         buttonStartService.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -45,7 +46,6 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onClick(View v) {
                 Intent serviceIntent = new Intent(MainActivity.this, ConnectionService.class);
-                serviceIntent.putExtra("ipAddress", editTextIpAddress.getText().toString());
                 Toast.makeText(MainActivity.this, "Stopping Android Auto proxy", Toast.LENGTH_LONG).show();
                 stopService(serviceIntent);
             }
@@ -63,6 +63,8 @@ public class MainActivity extends AppCompatActivity {
             stopService(serviceIntent);
         } else if ("android.hardware.usb.action.USB_ACCESSORY_ATTACHED".equalsIgnoreCase(paramIntent.getAction())) {
             Toast.makeText(this, "Starting Android Auto proxy", Toast.LENGTH_LONG).show();
+            serviceIntent.setAction(ConnectionService.ACTION_START);
+            serviceIntent.putExtra("ipAddress", "192.168.1.123"); //TODO should be read from preferences
             serviceIntent.putExtra("accessory", paramIntent.getParcelableExtra("accessory"));
             startService(serviceIntent);
         }

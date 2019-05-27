@@ -112,7 +112,11 @@ public class ConnectionService extends Service {
                     handler.post(new Runnable() {
                         @Override
                         public void run() {
-                            mNotificationManager.notify(1, createNotification("Error occurred, please reinsert USB cable to restart."));
+                            StringBuilder msg = new StringBuilder(e.getMessage());
+                            for (int i = 0; i < e.getStackTrace().length && i < 3; i++) {
+                                msg.append(e.getStackTrace()[i].toString()).append("\n");
+                            }
+                            mNotificationManager.notify(1, createNotification(msg.toString()));
                         }
                     });
                 }
@@ -200,8 +204,7 @@ public class ConnectionService extends Service {
                 wifiToUSBPipe.start();
             } catch (Exception e) {
                 Log.d("AAGateway", "Could not connect", e);
-                if (running) errorListener.onError(e);
-                closeQuietly(this);
+                onError(e);
             }
         }
 
@@ -221,6 +224,7 @@ public class ConnectionService extends Service {
         @Override
         public void onError(Exception e) {
             if (running) errorListener.onError(e);
+            closeQuietly(this);
         }
     }
 
