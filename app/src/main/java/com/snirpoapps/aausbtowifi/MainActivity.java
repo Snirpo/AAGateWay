@@ -2,9 +2,11 @@ package com.snirpoapps.aausbtowifi;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.DhcpInfo;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
+import android.preference.PreferenceManager;
 import android.support.v7.app.AppCompatActivity;
 import android.view.View;
 import android.widget.Button;
@@ -12,6 +14,7 @@ import android.widget.EditText;
 import android.widget.Toast;
 
 public class MainActivity extends AppCompatActivity {
+    private static final String PREF_PHONE_IP_ADDRESS = "phoneIpAdress";
     private static final String TAG = "AAGateWay";
     private EditText editTextIpAddress;
     private Button buttonStartService;
@@ -25,11 +28,6 @@ public class MainActivity extends AppCompatActivity {
         editTextIpAddress = findViewById(R.id.editTextIpAddress);
         buttonStartService = findViewById(R.id.buttonStartService);
         buttonStopService = findViewById(R.id.buttonStopService);
-
-        WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        DhcpInfo d = wifi.getDhcpInfo();
-        //editTextIpAddress.setText(intToIp(d.gateway));
-        editTextIpAddress.setText("192.168.1.123");
 
         buttonStartService.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -56,30 +54,27 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
 
-        Intent paramIntent = getIntent();
-        Intent serviceIntent = new Intent(this, ConnectionService.class);
-        if ("android.hardware.usb.action.USB_ACCESSORY_DETACHED".equalsIgnoreCase(paramIntent.getAction())) {
-            Toast.makeText(this, "Stopping Android Auto proxy", Toast.LENGTH_LONG).show();
-            stopService(serviceIntent);
-        } else if ("android.hardware.usb.action.USB_ACCESSORY_ATTACHED".equalsIgnoreCase(paramIntent.getAction())) {
-            Toast.makeText(this, "Starting Android Auto proxy", Toast.LENGTH_LONG).show();
-            serviceIntent.setAction(ConnectionService.ACTION_START);
-            serviceIntent.putExtra("ipAddress", "192.168.1.123"); //TODO should be read from preferences
-            serviceIntent.putExtra("accessory", paramIntent.getParcelableExtra("accessory"));
-            startService(serviceIntent);
-        }
+        WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        DhcpInfo dhcpInfo = wifi.getDhcpInfo();
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        String phoneIpAdress = prefs.getString(PREF_PHONE_IP_ADDRESS, intToIp(dhcpInfo.gateway));
+        editTextIpAddress.setText(phoneIpAdress);
     }
 
     @Override
-    protected void onNewIntent(Intent paramIntent) {
-        super.onNewIntent(paramIntent);
-        setIntent(paramIntent);
+    protected void onPause() {
+        super.onPause();
+
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        prefs.edit()
+                .putString(PREF_PHONE_IP_ADDRESS, editTextIpAddress.getText().toString())
+                .apply();
     }
 
     private static String intToIp(int addr) {
         return ((addr & 0xFF) + "." +
                 ((addr >>>= 8) & 0xFF) + "." +
                 ((addr >>>= 8) & 0xFF) + "." +
-                ((addr >>>= 8) & 0xFF));
+                (addr >>> 8 & 0xFF));
     }
 }
