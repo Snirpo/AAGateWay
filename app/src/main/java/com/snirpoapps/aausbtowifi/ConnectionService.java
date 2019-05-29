@@ -13,6 +13,7 @@ import android.hardware.usb.UsbManager;
 import android.os.Binder;
 import android.os.Build;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
@@ -36,9 +37,11 @@ public class ConnectionService extends Service {
     public static final String ACTION_STOP = ConnectionService.class.getName().toLowerCase() + ".action.stop";
     private static final String CHANNEL_ONE_ID = "com.snirpoapps.aausbtowifi";
     private static final String CHANNEL_ONE_NAME = "Channel One";
+    private static final Long RECONNECT_DELAY = 5000L;
 
     private NotificationManager mNotificationManager;
     private final IBinder mBinder = new LocalBinder();
+    private final Handler handler = new Handler(Looper.getMainLooper());
 
     private Connection connection;
 
@@ -100,24 +103,17 @@ public class ConnectionService extends Service {
             stopForeground(true);
             stopSelf();
         } else if (ACTION_START.equals(intent.getAction())) {
-            closeQuietly(connection);
+            if (connection != null) connection.close();
 
-            UsbAccessory usbAccessory = intent.getParcelableExtra("accessory");
-            String ipAddress = intent.getStringExtra("ipAddress");
+            final UsbAccessory usbAccessory = intent.getParcelableExtra("accessory");
+            final String ipAddress = intent.getStringExtra("ipAddress");
 
-            final Handler handler = new Handler(Looper.getMainLooper());
             connection = new Connection(usbAccessory, ipAddress, new ErrorListener() {
                 @Override
                 public void onError(final Exception e) {
-                    handler.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            mNotificationManager.notify(1, createNotification(e.getMessage()));
-                        }
-                    });
+                    mNotificationManager.notify(1, createNotification("Error, reconnecting: " + e.getMessage()));
                 }
             });
-            connection.start();
         } else {
             throw new RuntimeException("Invalid action " + intent.getAction());
         }
@@ -128,8 +124,7 @@ public class ConnectionService extends Service {
     @Override
     public void onDestroy() {
         stopForeground(true);
-        closeQuietly(connection);
-        connection = null;
+        if (connection != null) connection.close();
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             mNotificationManager.deleteNotificationChannel(CHANNEL_ONE_ID);
         }
@@ -139,8 +134,8 @@ public class ConnectionService extends Service {
         void onError(Exception e);
     }
 
-    private class Connection extends Thread implements Closeable, ErrorListener {
-        private volatile boolean running = true;
+    private class Connection implements Closeable, ErrorListener {
+        private boolean running = true;
 
         private final UsbAccessory usbAccessory;
         private final String ipAddress;
@@ -152,16 +147,37 @@ public class ConnectionService extends Service {
         private Pipe usbToWifiPipe;
         private Pipe wifiToUSBPipe;
 
-        private ErrorListener errorListener;
+        private final ErrorListener errorListener;
+        private final HandlerThread handlerThread;
+        private final Handler mainHandler;
+        private final Handler asyncHandler;
+
+        private final Runnable reconnectRunnable = new Runnable() {
+            @Override
+            public void run() {
+                connect();
+            }
+        };
 
         public Connection(UsbAccessory usbAccessory, String ipAddress, ErrorListener errorListener) {
             this.usbAccessory = usbAccessory;
             this.ipAddress = ipAddress;
             this.errorListener = errorListener;
+
+            this.mainHandler = new Handler(Looper.getMainLooper());
+
+            this.handlerThread = new HandlerThread("Connection");
+            this.handlerThread.start();
+            this.asyncHandler = new Handler(handlerThread.getLooper());
+            this.asyncHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    connect();
+                }
+            });
         }
 
-        @Override
-        public void run() {
+        private void connect() {
             try {
                 Log.d(TAG, "Started connecting");
 
@@ -205,22 +221,37 @@ public class ConnectionService extends Service {
         }
 
         @Override
-        public void close() throws IOException {
-            Log.d("AAGateway", "Closing connection");
+        public void close() {
             running = false;
+            asyncHandler.removeCallbacks(reconnectRunnable);
+            asyncHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    Log.d("AAGateway", "Closing connection");
+                    cleanup();
+                }
+            });
+        }
 
+        @Override
+        public void onError(final Exception e) {
+            cleanup();
+            mainHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    if (running) errorListener.onError(e);
+                }
+            });
+            asyncHandler.postDelayed(reconnectRunnable, RECONNECT_DELAY);
+        }
+
+        private void cleanup() {
             closeQuietly(usbToWifiPipe);
             closeQuietly(wifiToUSBPipe);
 
             closeQuietly(huServerSocket);
             closeQuietly(huSocket);
             closeQuietly(phoneSocket);
-        }
-
-        @Override
-        public void onError(Exception e) {
-            if (running) errorListener.onError(e);
-            closeQuietly(this);
         }
     }
 
