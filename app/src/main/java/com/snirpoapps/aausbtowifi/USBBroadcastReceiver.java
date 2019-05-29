@@ -15,7 +15,7 @@ public class USBBroadcastReceiver extends BroadcastReceiver {
         } else if ("android.hardware.usb.action.USB_ACCESSORY_ATTACHED".equalsIgnoreCase(intent.getAction())) {
             Toast.makeText(context, "Starting Android Auto proxy", Toast.LENGTH_LONG).show();
             serviceIntent.setAction(ConnectionService.ACTION_START);
-            serviceIntent.putExtra("ipAddress", "192.168.1.123"); //TODO should be read from preferences
+            serviceIntent.putExtra("ipAddress", Utils.determinePhoneIpAddress(context)); //TODO should be read from preferences
             serviceIntent.putExtra("accessory", intent.getParcelableExtra("accessory"));
             context.startService(serviceIntent);
         }

@@ -1,10 +1,7 @@
 package com.snirpoapps.aausbtowifi;
 
-import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.net.DhcpInfo;
-import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
 import android.support.v7.app.AppCompatActivity;
@@ -14,7 +11,6 @@ import android.widget.EditText;
 import android.widget.Toast;
 
 public class MainActivity extends AppCompatActivity {
-    private static final String PREF_PHONE_IP_ADDRESS = "phoneIpAdress";
     private static final String TAG = "AAGateWay";
     private EditText editTextIpAddress;
     private Button buttonStartService;
@@ -53,12 +49,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-
-        WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        DhcpInfo dhcpInfo = wifi.getDhcpInfo();
-        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
-        String phoneIpAdress = prefs.getString(PREF_PHONE_IP_ADDRESS, intToIp(dhcpInfo.gateway));
-        editTextIpAddress.setText(phoneIpAdress);
+        editTextIpAddress.setText(Utils.determinePhoneIpAddress(this));
     }
 
     @Override
@@ -67,14 +58,7 @@ public class MainActivity extends AppCompatActivity {
 
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
         prefs.edit()
-                .putString(PREF_PHONE_IP_ADDRESS, editTextIpAddress.getText().toString())
+                .putString(Preferences.PHONE_IP_ADDRESS, editTextIpAddress.getText().toString())
                 .apply();
-    }
-
-    private static String intToIp(int addr) {
-        return ((addr & 0xFF) + "." +
-                ((addr >>>= 8) & 0xFF) + "." +
-                ((addr >>>= 8) & 0xFF) + "." +
-                (addr >>> 8 & 0xFF));
     }
 }
