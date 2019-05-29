@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.snirpoapps.aausbtowifi">
-    <uses-feature android:name="android.hardware.usb"/>
-    <uses-feature android:name="android.hardware.usb.accessory"/>
+
+    <uses-feature android:name="android.hardware.usb" />
+    <uses-feature android:name="android.hardware.usb.accessory" />
 
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -21,19 +22,22 @@
             android:launchMode="singleInstance"
             android:showOnLockScreen="true">
             <intent-filter>
-                <action android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"/>
-                <action android:name="android.hardware.usb.action.USB_ACCESSORY_DETACHED"/>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <meta-data android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED" android:resource="@xml/accessory_filter"/>
-
         </activity>
+        <receiver android:name="com.snirpoapps.aausbtowifi.USBBroadcastReceiver">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED" />
+                <action android:name="android.hardware.usb.action.USB_ACCESSORY_DETACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"
+                android:resource="@xml/accessory_filter" />
+        </receiver>
         <service
             android:name="com.snirpoapps.aausbtowifi.ConnectionService"
-            android:exported="false">
-
-        </service>
+            android:exported="false"></service>
     </application>
 
 </manifest>

@@ -112,11 +112,7 @@ public class ConnectionService extends Service {
                     handler.post(new Runnable() {
                         @Override
                         public void run() {
-                            StringBuilder msg = new StringBuilder(e.getMessage());
-                            for (int i = 0; i < e.getStackTrace().length && i < 3; i++) {
-                                msg.append(e.getStackTrace()[i].toString()).append("\n");
-                            }
-                            mNotificationManager.notify(1, createNotification(msg.toString()));
+                            mNotificationManager.notify(1, createNotification(e.getMessage()));
                         }
                     });
                 }
