@@ -30,6 +30,7 @@
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED" />
                 <action android:name="android.hardware.usb.action.USB_ACCESSORY_DETACHED" />
+                <action android:name="android.net.wifi.STATE_CHANGE" />
             </intent-filter>
             <meta-data
                 android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"

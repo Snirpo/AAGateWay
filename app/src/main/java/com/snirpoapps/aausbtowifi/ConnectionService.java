@@ -5,18 +5,28 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.hardware.usb.UsbAccessory;
 import android.hardware.usb.UsbManager;
-import android.os.Binder;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkInfo;
+import android.net.NetworkRequest;
+import android.net.wifi.WifiConfiguration;
+import android.net.wifi.WifiInfo;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
+import android.preference.PreferenceManager;
 import android.util.Log;
 
 import java.io.Closeable;
@@ -40,20 +50,18 @@ public class ConnectionService extends Service {
     private static final Long RECONNECT_DELAY = 5000L;
 
     private NotificationManager mNotificationManager;
-    private final IBinder mBinder = new LocalBinder();
-    private final Handler handler = new Handler(Looper.getMainLooper());
-
     private Connection connection;
+
+    private BroadcastReceiver wifiBroadcastReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+
+        }
+    };
 
     @Override
     public IBinder onBind(Intent intent) {
-        return mBinder;
-    }
-
-    public class LocalBinder extends Binder {
-        ConnectionService getService() {
-            return ConnectionService.this;
-        }
+        return null;
     }
 
     @Override
@@ -72,6 +80,43 @@ public class ConnectionService extends Service {
         }
 
         startForeground(1, createNotification("Running..."));
+    }
+
+    private void connectToWifi() {
+        final SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
+        final String phoneSSID = preferences.getString(Preferences.PHONE_SSID, "");
+
+        final ConnectivityManager connManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        final WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+
+        NetworkRequest.Builder req = new NetworkRequest.Builder();
+        req.addTransportType(NetworkCapabilities.TRANSPORT_WIFI);
+        connManager.registerNetworkCallback(req.build(), new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(Network network) {
+                WifiInfo connectionInfo = wifiManager.getConnectionInfo();
+                if (connectionInfo != null && phoneSSID.equals(connectionInfo.getSSID())) {
+                    // do something
+                } else {
+                    // wrong network, connect to phone
+                    connectToPhone(phoneSSID);
+                }
+                connManager.unregisterNetworkCallback(this);
+            }
+        });
+    }
+
+    private boolean connectToPhone(String phoneSSID) {
+        final WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        for (WifiConfiguration config : wifiManager.getConfiguredNetworks()) {
+            if (("\"" + phoneSSID + "\"").equals(config.SSID)) {
+                wifiManager.disconnect();
+                wifiManager.enableNetwork(config.networkId, true);
+                wifiManager.reconnect();
+                return true;
+            }
+        }
+        return false;
     }
 
     private Notification createNotification(String text) {
@@ -203,6 +248,9 @@ public class ConnectionService extends Service {
                     huOutputStream = huSocket.getOutputStream();
                 }
 
+                WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                wifi.getConnectionInfo().getBSSID()
+
                 Log.d(TAG, "HU connected, connecting to phone");
                 phoneSocket = new Socket(ipAddress, 5277);
                 InputStream phoneInputStream = phoneSocket.getInputStream();
@@ -252,6 +300,19 @@ public class ConnectionService extends Service {
             closeQuietly(huServerSocket);
             closeQuietly(huSocket);
             closeQuietly(phoneSocket);
+        }
+
+        private boolean isConnectedToPhone() {
+            ConnectivityManager connManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            NetworkInfo networkInfo = connManager.getActiveNetworkInfo();
+            if (networkInfo.isConnected() && networkInfo.getType() == ConnectivityManager.TYPE_WIFI) {
+                WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                WifiInfo connectionInfo = wifiManager.getConnectionInfo();
+                SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
+                String phoneSSID = preferences.getString(Preferences.PHONE_SSID, "");
+                return connectionInfo != null && phoneSSID.equals(connectionInfo.getSSID());
+            }
+            return false;
         }
     }
 
