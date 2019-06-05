@@ -80,7 +80,7 @@ public class MainActivity extends AppCompatActivity {
         ArrayAdapter<String> dataAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, networks);
         dataAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spinnerPhoneSSID.setAdapter(dataAdapter);
-        spinnerPhoneSSID.setSelection(dataAdapter.getPosition(preferences.getString(Preferences.PHONE_SSID, "")));
+        spinnerPhoneSSID.setSelection(dataAdapter.getPosition(preferences.getString(Preferences.PHONE_SSID, "").replace("\"", "")));
         editTextIpAddress.setText(preferences.getString(Preferences.PHONE_IP_ADDRESS, ""));
     }
 
@@ -99,9 +99,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void saveSettings() {
-        preferences.edit()
-                .putString(Preferences.PHONE_SSID, "\"" + spinnerPhoneSSID.getSelectedItem().toString() + "\"")
-                .putString(Preferences.PHONE_IP_ADDRESS, editTextIpAddress.getText().toString())
-                .commit();
+        SharedPreferences.Editor editor = preferences.edit()
+                .putString(Preferences.PHONE_IP_ADDRESS, editTextIpAddress.getText().toString());
+        if (spinnerPhoneSSID.getSelectedItem() != null) {
+            editor.putString(Preferences.PHONE_SSID, "\"" + spinnerPhoneSSID.getSelectedItem().toString() + "\"");
+        }
+        editor.commit();
     }
 }

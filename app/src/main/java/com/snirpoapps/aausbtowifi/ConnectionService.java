@@ -37,7 +37,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.ServerSocket;
 import java.net.Socket;
 
 import static android.app.NotificationManager.IMPORTANCE_HIGH;
@@ -58,16 +57,16 @@ public class ConnectionService extends Service {
 
     private Connection connection;
     private Network phoneNetwork;
-    private UsbAccessory hudUsbAccessory;
+    private UsbAccessory huUsbAccessory;
 
     private BroadcastReceiver usbBroadcastReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             if ("android.hardware.usb.action.USB_ACCESSORY_ATTACHED".equals(intent.getAction())) {
-                hudUsbAccessory = intent.getParcelableExtra("accessory");
+                huUsbAccessory = intent.getParcelableExtra("accessory");
                 tryConnect();
             } else if ("android.hardware.usb.action.USB_ACCESSORY_DETACHED".equals(intent.getAction())) {
-                hudUsbAccessory = null;
+                huUsbAccessory = null;
                 disconnect();
             }
         }
@@ -89,6 +88,7 @@ public class ConnectionService extends Service {
 
         @Override
         public void onUnavailable() {
+            notificationManager.notify(1, createNotification("Not connected to wifi, please turn wifi on"));
             phoneNetwork = null;
             disconnect();
         }
@@ -133,7 +133,7 @@ public class ConnectionService extends Service {
     private void tryConnect() {
         disconnect();
 
-        if (hudUsbAccessory == null) {
+        if (huUsbAccessory == null) {
             notificationManager.notify(1, createNotification("Waiting for headunit..."));
             return;
         }
@@ -149,7 +149,7 @@ public class ConnectionService extends Service {
             phoneIpAddress = Utils.intToIp(dhcpInfo.gateway);
         }
         notificationManager.notify(1, createNotification("Setting up Android Auto connection..."));
-        connection = new Connection(hudUsbAccessory, phoneNetwork, phoneIpAddress);
+        connection = new Connection(huUsbAccessory, phoneNetwork, phoneIpAddress);
     }
 
     private void disconnect() {
@@ -176,17 +176,17 @@ public class ConnectionService extends Service {
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         PendingIntent mainIntent = PendingIntent.getActivity(this, 0, intent, 0);
 
-        Intent playIntent = new Intent(this, ConnectionService.class);
-        playIntent.setAction(ACTION_STOP);
-        PendingIntent stopIntent = PendingIntent.getService(this, 0,
-                playIntent, 0);
+        Intent stopIntent = new Intent(this, ConnectionService.class);
+        stopIntent.setAction(ACTION_STOP);
+        PendingIntent stopPendingIntent = PendingIntent.getService(this, 0,
+                stopIntent, 0);
 
         Notification.Builder notification = new Notification.Builder(this)
                 .setContentTitle("Android Auto USB to Wifi bridge")
                 .setSmallIcon(R.drawable.aawifi)
                 .setContentText(text)
                 .setContentIntent(mainIntent)
-                .addAction(android.R.drawable.ic_delete, "Stop", stopIntent);
+                .addAction(android.R.drawable.ic_delete, "Stop", stopPendingIntent);
         if (Build.VERSION.SDK_INT >= 26)
             notification.setChannelId(CHANNEL_ONE_ID);
         return notification.build();
@@ -224,8 +224,6 @@ public class ConnectionService extends Service {
         private final Network network;
         private final String ipAddress;
 
-        private ServerSocket huServerSocket;
-        private Socket huSocket;
         private Socket phoneSocket;
 
         private Pipe usbToWifiPipe;
@@ -327,8 +325,6 @@ public class ConnectionService extends Service {
             closeQuietly(usbToWifiPipe);
             closeQuietly(wifiToUSBPipe);
 
-            closeQuietly(huServerSocket);
-            closeQuietly(huSocket);
             closeQuietly(phoneSocket);
         }
     }
