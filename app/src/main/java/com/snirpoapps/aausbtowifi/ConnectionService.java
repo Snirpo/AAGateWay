@@ -150,6 +150,7 @@ public class ConnectionService extends Service {
         }
         notificationManager.notify(1, createNotification("Setting up Android Auto connection..."));
         connection = new Connection(huUsbAccessory, phoneNetwork, phoneIpAddress);
+        connection.connect();
     }
 
     private void disconnect() {
@@ -244,18 +245,21 @@ public class ConnectionService extends Service {
             this.network = network;
             this.ipAddress = ipAddress;
 
-            this.handlerThread = new HandlerThread("Connection");
+            this.handlerThread = new HandlerThread("AA Connection");
             this.handlerThread.start();
             this.asyncHandler = new Handler(handlerThread.getLooper());
+        }
+
+        public void connect() {
             this.asyncHandler.post(new Runnable() {
                 @Override
                 public void run() {
-                    connect();
+                    doConnect();
                 }
             });
         }
 
-        private void connect() {
+        private void doConnect() {
             try {
                 Log.d(TAG, "Connecting via USB to HU");
                 UsbManager usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
