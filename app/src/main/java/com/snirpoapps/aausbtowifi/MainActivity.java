@@ -73,15 +73,19 @@ public class MainActivity extends AppCompatActivity {
         EasyPermissions.requestPermissions(this, "This app needs some permissions, please accept them.", 1, PERMISSIONS);
 
         WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        List<String> networks = new ArrayList<>();
-        for (WifiConfiguration config : wifiManager.getConfiguredNetworks()) {
-            networks.add(config.SSID.replace("\"", ""));
+        if (EasyPermissions.hasPermissions(this, PERMISSIONS) && wifiManager.isWifiEnabled()) {
+            List<String> networks = new ArrayList<>();
+            for (WifiConfiguration config : wifiManager.getConfiguredNetworks()) {
+                networks.add(config.SSID.replace("\"", ""));
+            }
+            ArrayAdapter<String> dataAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, networks);
+            dataAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            spinnerPhoneSSID.setAdapter(dataAdapter);
+            spinnerPhoneSSID.setSelection(dataAdapter.getPosition(preferences.getString(Preferences.PHONE_SSID, "").replace("\"", "")));
+            editTextIpAddress.setText(preferences.getString(Preferences.PHONE_IP_ADDRESS, ""));
+        } else {
+            Toast.makeText(this, "Please enable wifi to view networks", Toast.LENGTH_LONG).show();
         }
-        ArrayAdapter<String> dataAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, networks);
-        dataAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        spinnerPhoneSSID.setAdapter(dataAdapter);
-        spinnerPhoneSSID.setSelection(dataAdapter.getPosition(preferences.getString(Preferences.PHONE_SSID, "").replace("\"", "")));
-        editTextIpAddress.setText(preferences.getString(Preferences.PHONE_IP_ADDRESS, ""));
     }
 
     @Override
@@ -93,8 +97,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-
-        // Forward results to EasyPermissions
         EasyPermissions.onRequestPermissionsResult(requestCode, permissions, grantResults, this);
     }
 

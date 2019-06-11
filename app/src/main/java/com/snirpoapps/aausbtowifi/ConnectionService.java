@@ -38,6 +38,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
+import java.util.Objects;
 
 import static android.app.NotificationManager.IMPORTANCE_HIGH;
 
@@ -62,12 +63,11 @@ public class ConnectionService extends Service {
     private BroadcastReceiver usbBroadcastReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            if ("android.hardware.usb.action.USB_ACCESSORY_ATTACHED".equals(intent.getAction())) {
-                huUsbAccessory = intent.getParcelableExtra("accessory");
-                tryConnect();
-            } else if ("android.hardware.usb.action.USB_ACCESSORY_DETACHED".equals(intent.getAction())) {
-                huUsbAccessory = null;
-                disconnect();
+            if ("android.hardware.usb.action.USB_ACCESSORY_DETACHED".equals(intent.getAction())) {
+                if (Objects.equals(huUsbAccessory, intent.getParcelableExtra("accessory"))) {
+                    huUsbAccessory = null;
+                    disconnect();
+                }
             }
         }
     };
@@ -121,7 +121,6 @@ public class ConnectionService extends Service {
         startForeground(1, createNotification("Idle"));
 
         IntentFilter filter = new IntentFilter();
-        filter.addAction("android.hardware.usb.action.USB_ACCESSORY_ATTACHED");
         filter.addAction("android.hardware.usb.action.USB_ACCESSORY_DETACHED");
         registerReceiver(usbBroadcastReceiver, filter);
 
@@ -199,6 +198,9 @@ public class ConnectionService extends Service {
         if (ACTION_STOP.equals(intent.getAction())) {
             stopForeground(true);
             stopSelf();
+        } else if (intent.hasExtra("accessory")) {
+            huUsbAccessory = intent.getParcelableExtra("accessory");
+            tryConnect();
         }
         return START_STICKY;
     }
@@ -225,6 +227,7 @@ public class ConnectionService extends Service {
         private final Network network;
         private final String ipAddress;
 
+        private ParcelFileDescriptor huFileDescriptor;
         private Socket phoneSocket;
 
         private Pipe usbToWifiPipe;
@@ -263,13 +266,13 @@ public class ConnectionService extends Service {
             try {
                 Log.d(TAG, "Connecting via USB to HU");
                 UsbManager usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
-                ParcelFileDescriptor fileDescriptor = usbManager.openAccessory(usbAccessory);
-                if (fileDescriptor == null) {
+                huFileDescriptor = usbManager.openAccessory(usbAccessory);
+                if (huFileDescriptor == null) {
                     throw new IllegalArgumentException("Accessory not found!");
                 }
-                FileDescriptor fd = fileDescriptor.getFileDescriptor();
-                InputStream huInputStream = new FileInputStream(fd);
-                OutputStream huOutputStream = new FileOutputStream(fd);
+                FileDescriptor fileDescriptor = huFileDescriptor.getFileDescriptor();
+                InputStream huInputStream = new FileInputStream(fileDescriptor);
+                OutputStream huOutputStream = new FileOutputStream(fileDescriptor);
 
                 Log.d(TAG, "HU connected, connecting to phone");
                 phoneSocket = network.getSocketFactory().createSocket(ipAddress, 5277);
@@ -329,6 +332,7 @@ public class ConnectionService extends Service {
             closeQuietly(usbToWifiPipe);
             closeQuietly(wifiToUSBPipe);
 
+            closeQuietly(huFileDescriptor);
             closeQuietly(phoneSocket);
         }
     }
@@ -355,6 +359,7 @@ public class ConnectionService extends Service {
                 Log.d("AAGateway", "Pipe started reading");
                 while (running && (read = inputStream.read(buffer)) > -1) {
                     outputStream.write(buffer, 0, read);
+                    outputStream.flush();
                 }
                 Log.d("AAGateway", "Pipe stopped reading");
             } catch (IOException e) {
@@ -362,6 +367,8 @@ public class ConnectionService extends Service {
                 if (running) {
                     errorListener.onError(e);
                 }
+            } finally {
+                close();
             }
         }
 
