@@ -32,14 +32,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <receiver android:name="com.snirpoapps.aausbtowifi.USBBroadcastReceiver">
+        <activity
+            android:name="com.snirpoapps.aausbtowifi.USBActivity"
+            android:launchMode="singleInstance">
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED" />
             </intent-filter>
             <meta-data
                 android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"
                 android:resource="@xml/accessory_filter" />
-        </receiver>
+        </activity>
+
         <service
             android:name="com.snirpoapps.aausbtowifi.ConnectionService"
             android:enabled="true"

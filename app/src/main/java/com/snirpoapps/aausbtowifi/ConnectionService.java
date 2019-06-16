@@ -54,6 +54,7 @@ public class ConnectionService extends Service {
     private NotificationManager notificationManager;
     private ConnectivityManager connectivityManager;
     private WifiManager wifiManager;
+    private UsbManager usbManager;
     private SharedPreferences preferences;
 
     private Connection connection;
@@ -106,6 +107,7 @@ public class ConnectionService extends Service {
         connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
         preferences = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
 
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -201,6 +203,24 @@ public class ConnectionService extends Service {
         } else if (intent.hasExtra("accessory")) {
             huUsbAccessory = intent.getParcelableExtra("accessory");
             tryConnect();
+        } else {
+            UsbAccessory[] accessories = usbManager.getAccessoryList();
+            if (accessories != null) {
+                for (UsbAccessory usbAccessory : accessories) {
+                    if ("Android".equals(usbAccessory.getManufacturer()) &&
+                            ("Android Open Automotive Protocol".equals(usbAccessory.getModel()) || "Android Auto".equals(usbAccessory.getModel()))) {
+                        if (usbManager.hasPermission(usbAccessory)) {
+                            tryConnect();
+                        } else {
+                            Intent permissionIntent = new Intent(this, ConnectionService.class);
+                            permissionIntent.putExtra("accessory", usbAccessory);
+                            PendingIntent pendingIntent = PendingIntent.getService(this, 0, permissionIntent, 0);
+                            usbManager.requestPermission(usbAccessory, pendingIntent);
+                        }
+                        break;
+                    }
+                }
+            }
         }
         return START_STICKY;
     }
@@ -265,7 +285,6 @@ public class ConnectionService extends Service {
         private void doConnect() {
             try {
                 Log.d(TAG, "Connecting via USB to HU");
-                UsbManager usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
                 huFileDescriptor = usbManager.openAccessory(usbAccessory);
                 if (huFileDescriptor == null) {
                     throw new IllegalArgumentException("Accessory not found!");
@@ -275,10 +294,21 @@ public class ConnectionService extends Service {
                 OutputStream huOutputStream = new FileOutputStream(fileDescriptor);
 
                 Log.d(TAG, "HU connected, connecting to phone");
+
                 phoneSocket = network.getSocketFactory().createSocket(ipAddress, 5277);
                 InputStream phoneInputStream = phoneSocket.getInputStream();
                 OutputStream phoneOutputStream = phoneSocket.getOutputStream();
-                Log.d(TAG, "Connected to phoneNetwork");
+
+                Log.d(TAG, "Connected to phone");
+
+                phoneOutputStream.write(new byte[]{0, 3, 0, 6, 0, 1, 0, 1, 0, 2});
+                phoneOutputStream.flush();
+
+                huOutputStream.write(new byte[]{0, 3, 0, 8, 0, 2, 0, 1, 0, 4, 0, 0});
+                huOutputStream.flush();
+
+                readBytes(huInputStream, 10);
+                readBytes(phoneInputStream, 12);
 
                 usbToWifiPipe = new Pipe(huInputStream, phoneOutputStream, this);
                 wifiToUSBPipe = new Pipe(phoneInputStream, huOutputStream, this);
@@ -343,7 +373,7 @@ public class ConnectionService extends Service {
         private InputStream inputStream;
         private OutputStream outputStream;
 
-        private byte[] buffer = new byte[65536];
+        private byte[] buffer = new byte[16384];
         private volatile boolean running = true;
 
         public Pipe(InputStream inputStream, OutputStream outputStream, ErrorListener errorListener) {
@@ -388,5 +418,14 @@ public class ConnectionService extends Service {
                 // ignore
             }
         }
+    }
+
+    private static byte[] readBytes(InputStream is, int numBytes) throws IOException {
+        int i = numBytes;
+        byte[] buffer = new byte[i];
+        while (i > 0) {
+            i -= is.read(buffer, 0, i);
+        }
+        return buffer;
     }
 }
