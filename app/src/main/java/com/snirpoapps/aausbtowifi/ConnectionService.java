@@ -35,6 +35,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.Objects;
 
@@ -56,6 +57,7 @@ public class ConnectionService extends Service {
     private UsbManager usbManager;
     private SharedPreferences preferences;
 
+    // async vars
     private Connection connection;
     private Network phoneNetwork;
     private UsbAccessory huUsbAccessory;
@@ -276,7 +278,8 @@ public class ConnectionService extends Service {
 
                 Log.d(TAG, "HU connected, connecting to phone");
 
-                phoneSocket = network.getSocketFactory().createSocket(ipAddress, 5277);
+                phoneSocket = network.getSocketFactory().createSocket();
+                phoneSocket.connect(InetSocketAddress.createUnresolved(ipAddress, 5277), 10000);
                 InputStream phoneInputStream = phoneSocket.getInputStream();
                 OutputStream phoneOutputStream = phoneSocket.getOutputStream();
 
