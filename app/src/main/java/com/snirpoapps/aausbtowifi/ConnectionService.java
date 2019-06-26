@@ -18,14 +18,12 @@ import android.net.DhcpInfo;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
-import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
-import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.preference.PreferenceManager;
 import android.util.Log;
@@ -48,9 +46,10 @@ public class ConnectionService extends Service {
     private static final String TAG = "AAGateWay";
     private static final String CHANNEL_ONE_ID = "com.snirpoapps.aausbtowifi";
     private static final String CHANNEL_ONE_NAME = "Channel One";
-    private static final Long RECONNECT_DELAY = 5000L;
 
-    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private HandlerThread asyncHandlerThread;
+    private Handler asyncHandler;
+
     private NotificationManager notificationManager;
     private ConnectivityManager connectivityManager;
     private WifiManager wifiManager;
@@ -65,33 +64,48 @@ public class ConnectionService extends Service {
         @Override
         public void onReceive(Context context, Intent intent) {
             if ("android.hardware.usb.action.USB_ACCESSORY_DETACHED".equals(intent.getAction())) {
-                if (Objects.equals(huUsbAccessory, intent.getParcelableExtra("accessory"))) {
-                    huUsbAccessory = null;
-                    disconnect();
-                }
+                final UsbAccessory usbAccessory = intent.getParcelableExtra("accessory");
+                asyncHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (Objects.equals(huUsbAccessory, usbAccessory)) {
+                            huUsbAccessory = null;
+                            disconnect();
+                        }
+                    }
+                });
             }
         }
     };
 
     private ConnectivityManager.NetworkCallback networkCallback = new ConnectivityManager.NetworkCallback() {
         @Override
-        public void onAvailable(Network network) {
-            String phoneSSID = preferences.getString(Preferences.PHONE_SSID, "");
-            WifiInfo connectionInfo = wifiManager.getConnectionInfo();
-            if (connectionInfo != null && phoneSSID.equals(connectionInfo.getSSID())) {
-                phoneNetwork = network;
-                tryConnect();
-            } else {
-                notificationManager.notify(1, createNotification("Not connected to phone SSID, please connect to correct SSID"));
-                //connectToPhone(phoneSSID);
-            }
+        public void onAvailable(final Network network) {
+            asyncHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    String phoneSSID = preferences.getString(Preferences.PHONE_SSID, "");
+                    WifiInfo connectionInfo = wifiManager.getConnectionInfo();
+                    if (connectionInfo != null && phoneSSID.equals(connectionInfo.getSSID())) {
+                        phoneNetwork = network;
+                        tryConnect();
+                    } else {
+                        updateNotification("Not connected to phone SSID, please connect to correct SSID");
+                    }
+                }
+            });
         }
 
         @Override
         public void onUnavailable() {
-            notificationManager.notify(1, createNotification("Not connected to wifi, please turn wifi on"));
-            phoneNetwork = null;
-            disconnect();
+            asyncHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    updateNotification("Not connected to wifi, please turn wifi on");
+                    phoneNetwork = null;
+                    disconnect();
+                }
+            });
         }
     };
 
@@ -120,7 +134,7 @@ public class ConnectionService extends Service {
             notificationManager.createNotificationChannel(notificationChannel);
         }
 
-        startForeground(1, createNotification("Idle"));
+        startForeground(1, createNotification("Ready"));
 
         IntentFilter filter = new IntentFilter();
         filter.addAction("android.hardware.usb.action.USB_ACCESSORY_DETACHED");
@@ -129,18 +143,22 @@ public class ConnectionService extends Service {
         NetworkRequest.Builder request = new NetworkRequest.Builder();
         request.addTransportType(NetworkCapabilities.TRANSPORT_WIFI);
         connectivityManager.registerNetworkCallback(request.build(), networkCallback);
+
+        this.asyncHandlerThread = new HandlerThread("ConnectionServiceThread");
+        this.asyncHandlerThread.start();
+        this.asyncHandler = new Handler(asyncHandlerThread.getLooper());
     }
 
     private void tryConnect() {
         disconnect();
 
         if (huUsbAccessory == null) {
-            notificationManager.notify(1, createNotification("Waiting for headunit..."));
+            updateNotification("Waiting for headunit...");
             return;
         }
 
         if (phoneNetwork == null) {
-            notificationManager.notify(1, createNotification("Waiting for phone..."));
+            updateNotification("Waiting for phone...");
             return;
         }
 
@@ -149,7 +167,7 @@ public class ConnectionService extends Service {
             DhcpInfo dhcpInfo = wifiManager.getDhcpInfo();
             phoneIpAddress = Utils.intToIp(dhcpInfo.gateway);
         }
-        notificationManager.notify(1, createNotification("Setting up Android Auto connection..."));
+        updateNotification("Setting up Android Auto connection...");
         connection = new Connection(huUsbAccessory, phoneNetwork, phoneIpAddress);
         connection.connect();
     }
@@ -159,18 +177,6 @@ public class ConnectionService extends Service {
             connection.close();
             connection = null;
         }
-    }
-
-    private boolean connectToPhone(String phoneSSID) {
-        for (WifiConfiguration config : wifiManager.getConfiguredNetworks()) {
-            if (phoneSSID.equals(config.SSID)) {
-                wifiManager.disconnect();
-                wifiManager.enableNetwork(config.networkId, true);
-                wifiManager.reconnect();
-                return true;
-            }
-        }
-        return false;
     }
 
     private Notification createNotification(String text) {
@@ -194,6 +200,10 @@ public class ConnectionService extends Service {
         return notification.build();
     }
 
+    private void updateNotification(String text) {
+        notificationManager.notify(1, createNotification(text));
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         super.onStartCommand(intent, flags, startId);
@@ -201,39 +211,33 @@ public class ConnectionService extends Service {
             stopForeground(true);
             stopSelf();
         } else if (intent.hasExtra("accessory")) {
-            huUsbAccessory = intent.getParcelableExtra("accessory");
-            tryConnect();
-        } else {
-            UsbAccessory[] accessories = usbManager.getAccessoryList();
-            if (accessories != null) {
-                for (UsbAccessory usbAccessory : accessories) {
-                    if ("Android".equals(usbAccessory.getManufacturer()) &&
-                            ("Android Open Automotive Protocol".equals(usbAccessory.getModel()) || "Android Auto".equals(usbAccessory.getModel()))) {
-                        if (usbManager.hasPermission(usbAccessory)) {
-                            tryConnect();
-                        } else {
-                            Intent permissionIntent = new Intent(this, ConnectionService.class);
-                            permissionIntent.putExtra("accessory", usbAccessory);
-                            PendingIntent pendingIntent = PendingIntent.getService(this, 0, permissionIntent, 0);
-                            usbManager.requestPermission(usbAccessory, pendingIntent);
-                        }
-                        break;
-                    }
+            final UsbAccessory usbAccessory = intent.getParcelableExtra("accessory");
+            asyncHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    huUsbAccessory = usbAccessory;
+                    tryConnect();
                 }
-            }
+            });
         }
         return START_STICKY;
     }
 
     @Override
     public void onDestroy() {
+        asyncHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                disconnect();
+            }
+        });
         stopForeground(true);
-        disconnect();
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             notificationManager.deleteNotificationChannel(CHANNEL_ONE_ID);
         }
         connectivityManager.unregisterNetworkCallback(networkCallback);
         unregisterReceiver(usbBroadcastReceiver);
+        asyncHandlerThread.quitSafely();
     }
 
     public interface ErrorListener {
@@ -241,7 +245,7 @@ public class ConnectionService extends Service {
     }
 
     private class Connection implements Closeable, ErrorListener {
-        private boolean running = true;
+        private volatile boolean active = true;
 
         private final UsbAccessory usbAccessory;
         private final Network network;
@@ -253,36 +257,13 @@ public class ConnectionService extends Service {
         private Pipe usbToWifiPipe;
         private Pipe wifiToUSBPipe;
 
-        private final HandlerThread handlerThread;
-        private final Handler asyncHandler;
-
-        private final Runnable reconnectRunnable = new Runnable() {
-            @Override
-            public void run() {
-                connect();
-            }
-        };
-
         public Connection(UsbAccessory usbAccessory, Network network, String ipAddress) {
             this.usbAccessory = usbAccessory;
             this.network = network;
             this.ipAddress = ipAddress;
-
-            this.handlerThread = new HandlerThread("AA Connection");
-            this.handlerThread.start();
-            this.asyncHandler = new Handler(handlerThread.getLooper());
         }
 
         public void connect() {
-            this.asyncHandler.post(new Runnable() {
-                @Override
-                public void run() {
-                    doConnect();
-                }
-            });
-        }
-
-        private void doConnect() {
             try {
                 Log.d(TAG, "Connecting via USB to HU");
                 huFileDescriptor = usbManager.openAccessory(usbAccessory);
@@ -301,61 +282,38 @@ public class ConnectionService extends Service {
 
                 Log.d(TAG, "Connected to phone");
 
-                phoneOutputStream.write(new byte[]{0, 3, 0, 6, 0, 1, 0, 1, 0, 2});
-                phoneOutputStream.flush();
-
-                huOutputStream.write(new byte[]{0, 3, 0, 8, 0, 2, 0, 1, 0, 4, 0, 0});
-                huOutputStream.flush();
-
-                readBytes(huInputStream, 10);
-                readBytes(phoneInputStream, 12);
-
                 usbToWifiPipe = new Pipe(huInputStream, phoneOutputStream, this);
                 wifiToUSBPipe = new Pipe(phoneInputStream, huOutputStream, this);
 
                 usbToWifiPipe.start();
                 wifiToUSBPipe.start();
 
-                mainHandler.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (running) {
-                            notificationManager.notify(1, createNotification("Android auto connected"));
-                        }
-                    }
-                });
+                updateNotification("Android auto connected");
             } catch (Exception e) {
                 Log.d(TAG, "Could not connect", e);
-                onError(e);
+                cleanup();
+                updateNotification("Could not connect: " + e.getMessage());
             }
         }
 
         @Override
         public void close() {
-            running = false;
-            asyncHandler.removeCallbacks(reconnectRunnable);
-            asyncHandler.post(new Runnable() {
-                @Override
-                public void run() {
-                    Log.d(TAG, "Closing connection");
-                    cleanup();
-                }
-            });
-            handlerThread.quitSafely();
+            active = false;
+            cleanup();
+            updateNotification("Android auto disconnected");
         }
 
         @Override
         public void onError(final Exception e) {
-            cleanup();
-            mainHandler.post(new Runnable() {
+            asyncHandler.post(new Runnable() {
                 @Override
                 public void run() {
-                    if (running) {
-                        notificationManager.notify(1, createNotification("Error, reconnecting: " + e.getMessage()));
+                    cleanup();
+                    if (active) {
+                        updateNotification("Connection error: " + e.getMessage());
                     }
                 }
             });
-            asyncHandler.postDelayed(reconnectRunnable, RECONNECT_DELAY);
         }
 
         private void cleanup() {
@@ -367,7 +325,7 @@ public class ConnectionService extends Service {
         }
     }
 
-    private static class Pipe extends Thread implements Closeable {
+    private class Pipe extends Thread implements Closeable {
         private ErrorListener errorListener;
 
         private InputStream inputStream;
@@ -418,14 +376,5 @@ public class ConnectionService extends Service {
                 // ignore
             }
         }
-    }
-
-    private static byte[] readBytes(InputStream is, int numBytes) throws IOException {
-        int i = numBytes;
-        byte[] buffer = new byte[i];
-        while (i > 0) {
-            i -= is.read(buffer, 0, i);
-        }
-        return buffer;
     }
 }
