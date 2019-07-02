@@ -20,6 +20,7 @@ import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
+import android.net.wifi.p2p.WifiP2pManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -54,6 +55,7 @@ public class ConnectionService extends Service {
     private NotificationManager notificationManager;
     private ConnectivityManager connectivityManager;
     private WifiManager wifiManager;
+    private WifiP2pManager wifiP2PManager;
     private UsbManager usbManager;
     private SharedPreferences preferences;
 
@@ -111,6 +113,42 @@ public class ConnectionService extends Service {
         }
     };
 
+    private BroadcastReceiver wifiDirectBroadcastReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+//            String action = intent.getAction();
+//            if (WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION.equals(action)) {
+//                wifiP2PManager.requestPeers(wifip2pChannel, new WifiP2pManager.PeerListListener() {
+//                    @Override
+//                    public void onPeersAvailable(WifiP2pDeviceList peers) {
+//                        for (WifiP2pDevice device: peers.getDeviceList()) {
+//                            device.toString()
+//                        }
+//                    }
+//                });
+//            } else if (WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION.equals(action)) {
+//                NetworkInfo networkInfo = intent
+//                        .getParcelableExtra(WifiP2pManager.EXTRA_NETWORK_INFO);
+//                WifiP2pInfo p2pInfo = intent
+//                        .getParcelableExtra(WifiP2pManager.EXTRA_WIFI_P2P_INFO);
+//
+//                if (p2pInfo != null && p2pInfo.groupOwnerAddress != null) {
+//                    String goAddress = p2pInfo.groupOwnerAddress.getHostAddress();
+//                    boolean isGroupOwner = p2pInfo.isGroupOwner;
+//                }
+//                if (networkInfo.isConnected()) {
+//                    // we are connected with the other device, request connection
+//                    // info to find group owner IP
+//                    manager.requestConnectionInfo(channel, activity);
+//                } else {
+//                    // It's a disconnect
+//                    // activity.resetData();
+//                }
+//            }
+        }
+    };
+    private WifiP2pManager.Channel wifip2pChannel;
+
     @Override
     public IBinder onBind(Intent intent) {
         return null;
@@ -122,6 +160,7 @@ public class ConnectionService extends Service {
 
         connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        wifiP2PManager = (WifiP2pManager) getApplicationContext().getSystemService(Context.WIFI_P2P_SERVICE);
         notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
         preferences = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
@@ -138,9 +177,16 @@ public class ConnectionService extends Service {
 
         startForeground(1, createNotification("Ready"));
 
-        IntentFilter filter = new IntentFilter();
-        filter.addAction("android.hardware.usb.action.USB_ACCESSORY_DETACHED");
-        registerReceiver(usbBroadcastReceiver, filter);
+        IntentFilter usbAccessoryFilter = new IntentFilter();
+        usbAccessoryFilter.addAction("android.hardware.usb.action.USB_ACCESSORY_DETACHED");
+        registerReceiver(usbBroadcastReceiver, usbAccessoryFilter);
+
+        IntentFilter wifip2pFilter = new IntentFilter();
+        wifip2pFilter.addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION);
+        wifip2pFilter.addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION);
+        wifip2pFilter.addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION);
+        wifip2pFilter.addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION);
+        registerReceiver(wifiDirectBroadcastReceiver, wifip2pFilter);
 
         NetworkRequest.Builder request = new NetworkRequest.Builder();
         request.addTransportType(NetworkCapabilities.TRANSPORT_WIFI);
@@ -149,6 +195,23 @@ public class ConnectionService extends Service {
         this.asyncHandlerThread = new HandlerThread("ConnectionServiceThread");
         this.asyncHandlerThread.start();
         this.asyncHandler = new Handler(asyncHandlerThread.getLooper());
+        wifip2pChannel = wifiP2PManager.initialize(this, asyncHandlerThread.getLooper(), new WifiP2pManager.ChannelListener() {
+            @Override
+            public void onChannelDisconnected() {
+                //TODO
+            }
+        });
+//        wifiP2PManager.createGroup(wifip2pChannel, new WifiP2pManager.ActionListener() {
+//            @Override
+//            public void onSuccess() {
+//                updateNotification("P2P group creation successful");
+//            }
+//
+//            @Override
+//            public void onFailure(int reason) {
+//                updateNotification("P2P group creation failed. Retry.");
+//            }
+//        });
     }
 
     private void tryConnect() {
@@ -328,7 +391,7 @@ public class ConnectionService extends Service {
         }
     }
 
-    private class Pipe extends Thread implements Closeable {
+    private static class Pipe extends Thread implements Closeable {
         private ErrorListener errorListener;
 
         private InputStream inputStream;

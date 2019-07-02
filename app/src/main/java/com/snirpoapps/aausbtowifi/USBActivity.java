@@ -1,8 +1,9 @@
 package com.snirpoapps.aausbtowifi;
 
 import android.content.Intent;
-import android.support.v7.app.AppCompatActivity;
 import android.widget.Toast;
+
+import androidx.appcompat.app.AppCompatActivity;
 
 public class USBActivity extends AppCompatActivity {
     @Override
