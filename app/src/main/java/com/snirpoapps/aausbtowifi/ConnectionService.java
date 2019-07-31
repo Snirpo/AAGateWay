@@ -5,7 +5,6 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -21,12 +20,11 @@ import android.net.NetworkRequest;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Build;
-import android.os.Handler;
-import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.ParcelFileDescriptor;
 import android.preference.PreferenceManager;
 import android.util.Log;
+import android.util.Pair;
 
 import java.io.Closeable;
 import java.io.FileDescriptor;
@@ -37,7 +35,11 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.util.Objects;
+
+import io.reactivex.Observable;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.schedulers.Schedulers;
+import io.reactivex.subjects.PublishSubject;
 
 import static android.app.NotificationManager.IMPORTANCE_HIGH;
 
@@ -48,68 +50,14 @@ public class ConnectionService extends Service {
     private static final String CHANNEL_ONE_ID = "com.snirpoapps.aausbtowifi";
     private static final String CHANNEL_ONE_NAME = "Channel One";
 
-    private HandlerThread asyncHandlerThread;
-    private Handler asyncHandler;
-
     private NotificationManager notificationManager;
     private ConnectivityManager connectivityManager;
     private WifiManager wifiManager;
     private UsbManager usbManager;
     private SharedPreferences preferences;
 
-    // async vars
-    private Connection connection;
-    private Network phoneNetwork;
-    private UsbAccessory huUsbAccessory;
-
-    private BroadcastReceiver usbBroadcastReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            if ("android.hardware.usb.action.USB_ACCESSORY_DETACHED".equals(intent.getAction())) {
-                final UsbAccessory usbAccessory = intent.getParcelableExtra("accessory");
-                asyncHandler.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (Objects.equals(huUsbAccessory, usbAccessory)) {
-                            huUsbAccessory = null;
-                            disconnect();
-                        }
-                    }
-                });
-            }
-        }
-    };
-
-    private ConnectivityManager.NetworkCallback networkCallback = new ConnectivityManager.NetworkCallback() {
-        @Override
-        public void onAvailable(final Network network) {
-            asyncHandler.post(new Runnable() {
-                @Override
-                public void run() {
-                    String phoneSSID = preferences.getString(Preferences.PHONE_SSID, "");
-                    WifiInfo connectionInfo = wifiManager.getConnectionInfo();
-                    if (connectionInfo != null && phoneSSID.equals(connectionInfo.getSSID())) {
-                        phoneNetwork = network;
-                        tryConnect();
-                    } else {
-                        updateNotification("Not connected to phone SSID, please connect to correct SSID");
-                    }
-                }
-            });
-        }
-
-        @Override
-        public void onUnavailable() {
-            asyncHandler.post(new Runnable() {
-                @Override
-                public void run() {
-                    updateNotification("Not connected to wifi, please turn wifi on");
-                    phoneNetwork = null;
-                    disconnect();
-                }
-            });
-        }
-    };
+    private PublishSubject<Intent> usbAttached$;
+    private Disposable connectionDisposable;
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -138,47 +86,58 @@ public class ConnectionService extends Service {
 
         startForeground(1, createNotification("Ready"));
 
+        usbAttached$ = PublishSubject.create();
         IntentFilter usbAccessoryFilter = new IntentFilter();
-        usbAccessoryFilter.addAction("android.hardware.usb.action.USB_ACCESSORY_DETACHED");
-        registerReceiver(usbBroadcastReceiver, usbAccessoryFilter);
+        usbAccessoryFilter.addAction(UsbManager.ACTION_USB_ACCESSORY_ATTACHED);
+        Observable<Intent> usbDetached$ = ObservableUtils.registerReceiver(this, usbAccessoryFilter);
+        Observable<ConnectionState<UsbAccessory>> usb$ = Observable.merge(usbAttached$, usbDetached$)
+                .scan(ConnectionState.disconnected(), (state, intent) -> {
+                    UsbAccessory usbAccessory = intent.getParcelableExtra("accessory");
+                    if (UsbManager.ACTION_USB_ACCESSORY_ATTACHED.equals(intent.getAction())) {
+                        return ConnectionState.connected(usbAccessory);
+                    } else if (UsbManager.ACTION_USB_ACCESSORY_DETACHED.equals(intent.getAction())
+                            && state.getData().equals(usbAccessory)) {
+                        return ConnectionState.disconnected();
+                    }
+                    return state;
+                });
 
         NetworkRequest.Builder request = new NetworkRequest.Builder();
         request.addTransportType(NetworkCapabilities.TRANSPORT_WIFI);
-        connectivityManager.registerNetworkCallback(request.build(), networkCallback);
+        Observable<ConnectionState<Network>> network$ = ObservableUtils.observeNetwork(this, request.build())
+                .scan(ConnectionState.disconnected(), (state, event) -> {
+                    if (event.isConnected()) {
+                        String phoneSSID = preferences.getString(Preferences.PHONE_SSID, "");
+                        WifiInfo connectionInfo = wifiManager.getConnectionInfo();
+                        if (connectionInfo != null && phoneSSID.equals(connectionInfo.getSSID())) {
+                            return ConnectionState.connected(event.getData());
+                        } else {
+                            updateNotification("Not connected to phone SSID, please connect to correct SSID");
+                        }
+                    }
+                    return ConnectionState.disconnected();
+                });
 
-        this.asyncHandlerThread = new HandlerThread("ConnectionServiceThread");
-        this.asyncHandlerThread.start();
-        this.asyncHandler = new Handler(asyncHandlerThread.getLooper());
+        connectionDisposable = Observable.combineLatest(usb$, network$, Pair::create)
+                .scan(State.EMPTY, (state, pair) -> {
+                    state.close();
+                    if (!pair.first.isConnected() || !pair.second.isConnected()) {
+                        return State.EMPTY;
+                    }
+                    return tryConnect(pair.first.getData(), pair.second.getData());
+                }).observeOn(Schedulers.io()).subscribe();
     }
 
-    private void tryConnect() {
-        disconnect();
-
-        if (huUsbAccessory == null) {
-            updateNotification("Waiting for headunit...");
-            return;
-        }
-
-        if (phoneNetwork == null) {
-            updateNotification("Waiting for phone...");
-            return;
-        }
-
+    private Connection tryConnect(UsbAccessory usbAccessory, Network phoneNetwork) {
         String phoneIpAddress = preferences.getString(Preferences.PHONE_IP_ADDRESS, null);
         if (phoneIpAddress == null || phoneIpAddress.isEmpty()) {
             DhcpInfo dhcpInfo = wifiManager.getDhcpInfo();
             phoneIpAddress = Utils.intToIp(dhcpInfo.gateway);
         }
         updateNotification("Setting up Android Auto connection...");
-        connection = new Connection(huUsbAccessory, phoneNetwork, phoneIpAddress);
-        connection.connect();
-    }
-
-    private void disconnect() {
-        if (connection != null) {
-            connection.close();
-            connection = null;
-        }
+        Connection connection = new Connection(usbAccessory, phoneNetwork, phoneIpAddress);
+        connection.initialize();
+        return connection;
     }
 
     private Notification createNotification(String text) {
@@ -213,40 +172,25 @@ public class ConnectionService extends Service {
             stopForeground(true);
             stopSelf();
         } else if (intent.hasExtra("accessory")) {
-            final UsbAccessory usbAccessory = intent.getParcelableExtra("accessory");
-            asyncHandler.post(new Runnable() {
-                @Override
-                public void run() {
-                    huUsbAccessory = usbAccessory;
-                    tryConnect();
-                }
-            });
+            usbAttached$.onNext(intent);
         }
         return START_STICKY;
     }
 
     @Override
     public void onDestroy() {
-        asyncHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                disconnect();
-            }
-        });
         stopForeground(true);
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             notificationManager.deleteNotificationChannel(CHANNEL_ONE_ID);
         }
-        connectivityManager.unregisterNetworkCallback(networkCallback);
-        unregisterReceiver(usbBroadcastReceiver);
-        asyncHandlerThread.quitSafely();
+        connectionDisposable.dispose();
     }
 
     public interface ErrorListener {
         void onError(Exception e);
     }
 
-    private class Connection implements Closeable, ErrorListener {
+    private class Connection implements State, ErrorListener {
         private volatile boolean active = true;
 
         private final UsbAccessory usbAccessory;
@@ -265,7 +209,8 @@ public class ConnectionService extends Service {
             this.ipAddress = ipAddress;
         }
 
-        public void connect() {
+        @Override
+        public void initialize() {
             try {
                 Log.d(TAG, "Connecting via USB to HU");
                 huFileDescriptor = usbManager.openAccessory(usbAccessory);
@@ -308,15 +253,10 @@ public class ConnectionService extends Service {
 
         @Override
         public void onError(final Exception e) {
-            asyncHandler.post(new Runnable() {
-                @Override
-                public void run() {
-                    cleanup();
-                    if (active) {
-                        updateNotification("Connection error: " + e.getMessage());
-                    }
-                }
-            });
+            cleanup();
+            if (active) {
+                updateNotification("Connection error: " + e.getMessage());
+            }
         }
 
         private void cleanup() {
