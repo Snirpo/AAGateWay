@@ -1,6 +1,7 @@
 package com.snirpoapps.aausbtowifi;
 
 import android.content.Intent;
+import android.os.Parcelable;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -11,7 +12,7 @@ public class USBActivity extends AppCompatActivity {
         super.onResume();
         if ("android.hardware.usb.action.USB_ACCESSORY_ATTACHED".equals(getIntent().getAction())) {
             Intent serviceIntent = new Intent(this, ConnectionService.class);
-            serviceIntent.putExtra("accessory", getIntent().getParcelableExtra("accessory"));
+            serviceIntent.putExtra("accessory", (Parcelable) getIntent().getParcelableExtra("accessory"));
             Toast.makeText(this, "Starting AA proxy service", Toast.LENGTH_LONG).show();
             startService(serviceIntent);
         }

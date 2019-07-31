@@ -56,7 +56,7 @@ public class ConnectionService extends Service {
     private UsbManager usbManager;
     private SharedPreferences preferences;
 
-    private PublishSubject<Intent> usbAttached$;
+    private PublishSubject<Intent> usbAttached$ = PublishSubject.create();
     private Disposable connectionDisposable;
 
     @Override
@@ -86,7 +86,6 @@ public class ConnectionService extends Service {
 
         startForeground(1, createNotification("Ready"));
 
-        usbAttached$ = PublishSubject.create();
         IntentFilter usbAccessoryFilter = new IntentFilter();
         usbAccessoryFilter.addAction(UsbManager.ACTION_USB_ACCESSORY_ATTACHED);
         Observable<Intent> usbDetached$ = ObservableUtils.registerReceiver(this, usbAccessoryFilter);
@@ -119,25 +118,24 @@ public class ConnectionService extends Service {
                 });
 
         connectionDisposable = Observable.combineLatest(usb$, network$, Pair::create)
-                .scan(State.EMPTY, (state, pair) -> {
-                    state.close();
-                    if (!pair.first.isConnected() || !pair.second.isConnected()) {
-                        return State.EMPTY;
-                    }
-                    return tryConnect(pair.first.getData(), pair.second.getData());
+                .switchMap(pair -> {
+                    UsbAccessory usbAccessory = pair.first.getData();
+                    Network phoneNetwork = pair.second.getData();
+                    return Observable.using(
+                            Connection::new,
+                            connection -> {
+                                String phoneIpAddress = preferences.getString(Preferences.PHONE_IP_ADDRESS, null);
+                                if (phoneIpAddress == null || phoneIpAddress.isEmpty()) {
+                                    DhcpInfo dhcpInfo = wifiManager.getDhcpInfo();
+                                    phoneIpAddress = Utils.intToIp(dhcpInfo.gateway);
+                                }
+                                updateNotification("Setting up Android Auto connection...");
+                                connection.initialize(usbAccessory, phoneNetwork, phoneIpAddress);
+                                return Observable.just(connection);
+                            },
+                            Closeable::close
+                    );
                 }).observeOn(Schedulers.io()).subscribe();
-    }
-
-    private Connection tryConnect(UsbAccessory usbAccessory, Network phoneNetwork) {
-        String phoneIpAddress = preferences.getString(Preferences.PHONE_IP_ADDRESS, null);
-        if (phoneIpAddress == null || phoneIpAddress.isEmpty()) {
-            DhcpInfo dhcpInfo = wifiManager.getDhcpInfo();
-            phoneIpAddress = Utils.intToIp(dhcpInfo.gateway);
-        }
-        updateNotification("Setting up Android Auto connection...");
-        Connection connection = new Connection(usbAccessory, phoneNetwork, phoneIpAddress);
-        connection.initialize();
-        return connection;
     }
 
     private Notification createNotification(String text) {
@@ -190,12 +188,8 @@ public class ConnectionService extends Service {
         void onError(Exception e);
     }
 
-    private class Connection implements State, ErrorListener {
+    private class Connection implements Closeable, ErrorListener {
         private volatile boolean active = true;
-
-        private final UsbAccessory usbAccessory;
-        private final Network network;
-        private final String ipAddress;
 
         private ParcelFileDescriptor huFileDescriptor;
         private Socket phoneSocket;
@@ -203,14 +197,10 @@ public class ConnectionService extends Service {
         private Pipe usbToWifiPipe;
         private Pipe wifiToUSBPipe;
 
-        public Connection(UsbAccessory usbAccessory, Network network, String ipAddress) {
-            this.usbAccessory = usbAccessory;
-            this.network = network;
-            this.ipAddress = ipAddress;
+        public Connection() {
         }
 
-        @Override
-        public void initialize() {
+        public void initialize(UsbAccessory usbAccessory, Network network, String ipAddress) {
             try {
                 Log.d(TAG, "Connecting via USB to HU");
                 huFileDescriptor = usbManager.openAccessory(usbAccessory);
