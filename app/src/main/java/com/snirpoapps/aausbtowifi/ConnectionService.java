@@ -35,9 +35,13 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.util.concurrent.TimeUnit;
 
+import io.reactivex.Completable;
 import io.reactivex.Observable;
 import io.reactivex.disposables.Disposable;
+import io.reactivex.disposables.Disposables;
+import io.reactivex.exceptions.Exceptions;
 import io.reactivex.schedulers.Schedulers;
 import io.reactivex.subjects.PublishSubject;
 
@@ -104,12 +108,12 @@ public class ConnectionService extends Service {
         NetworkRequest.Builder request = new NetworkRequest.Builder();
         request.addTransportType(NetworkCapabilities.TRANSPORT_WIFI);
         Observable<ConnectionState<Network>> network$ = ObservableUtils.observeNetwork(this, request.build())
-                .scan(ConnectionState.disconnected(), (state, event) -> {
-                    if (event.isConnected()) {
+                .scan(ConnectionState.disconnected(), (state, connectionState) -> {
+                    if (connectionState.isConnected()) {
                         String phoneSSID = preferences.getString(Preferences.PHONE_SSID, "");
                         WifiInfo connectionInfo = wifiManager.getConnectionInfo();
                         if (connectionInfo != null && phoneSSID.equals(connectionInfo.getSSID())) {
-                            return ConnectionState.connected(event.getData());
+                            return ConnectionState.connected(connectionState.getData());
                         } else {
                             updateNotification("Not connected to phone SSID, please connect to correct SSID");
                         }
@@ -118,23 +122,16 @@ public class ConnectionService extends Service {
                 });
 
         connectionDisposable = Observable.combineLatest(usb$, network$, Pair::create)
-                .switchMap(pair -> {
+                .switchMapCompletable(pair -> {
                     UsbAccessory usbAccessory = pair.first.getData();
                     Network phoneNetwork = pair.second.getData();
-                    return Observable.using(
-                            Connection::new,
-                            connection -> {
-                                String phoneIpAddress = preferences.getString(Preferences.PHONE_IP_ADDRESS, null);
-                                if (phoneIpAddress == null || phoneIpAddress.isEmpty()) {
-                                    DhcpInfo dhcpInfo = wifiManager.getDhcpInfo();
-                                    phoneIpAddress = Utils.intToIp(dhcpInfo.gateway);
-                                }
-                                updateNotification("Setting up Android Auto connection...");
-                                connection.initialize(usbAccessory, phoneNetwork, phoneIpAddress);
-                                return Observable.just(connection);
-                            },
-                            Closeable::close
-                    );
+                    String phoneIpAddress = preferences.getString(Preferences.PHONE_IP_ADDRESS, null);
+                    if (phoneIpAddress == null || phoneIpAddress.isEmpty()) {
+                        DhcpInfo dhcpInfo = wifiManager.getDhcpInfo();
+                        phoneIpAddress = Utils.intToIp(dhcpInfo.gateway);
+                    }
+                    updateNotification("Setting up Android Auto connection...");
+                    return createConnection(usbAccessory, phoneNetwork, phoneIpAddress);
                 }).observeOn(Schedulers.io()).subscribe();
     }
 
@@ -188,68 +185,57 @@ public class ConnectionService extends Service {
         void onError(Exception e);
     }
 
-    private class Connection implements Closeable, ErrorListener {
-        private volatile boolean active = true;
+    private Completable createConnection(UsbAccessory usbAccessory, Network network, String ipAddress) {
+        return Completable.create(subscriber -> {
+            try (Connection connection = new Connection(usbAccessory, network, ipAddress, subscriber::tryOnError)) {
+                subscriber.setDisposable(Disposables.fromRunnable(() -> {
+                    connection.close();
+                    updateNotification("Android auto disconnected");
+                }));
+                updateNotification("Android auto connected");
+            } catch (Exception e) {
+                Log.d(TAG, "Could not connect", e);
+                updateNotification("Could not connect: " + e.getMessage());
+                throw Exceptions.propagate(e);
+            }
+        }).retryWhen(it -> it.delay(10000, TimeUnit.MILLISECONDS));
+    }
 
+    private class Connection implements Closeable {
         private ParcelFileDescriptor huFileDescriptor;
         private Socket phoneSocket;
 
         private Pipe usbToWifiPipe;
         private Pipe wifiToUSBPipe;
 
-        public Connection() {
-        }
-
-        public void initialize(UsbAccessory usbAccessory, Network network, String ipAddress) {
-            try {
-                Log.d(TAG, "Connecting via USB to HU");
-                huFileDescriptor = usbManager.openAccessory(usbAccessory);
-                if (huFileDescriptor == null) {
-                    throw new IllegalArgumentException("Accessory not found!");
-                }
-                FileDescriptor fileDescriptor = huFileDescriptor.getFileDescriptor();
-                InputStream huInputStream = new FileInputStream(fileDescriptor);
-                OutputStream huOutputStream = new FileOutputStream(fileDescriptor);
-
-                Log.d(TAG, "HU connected, connecting to phone");
-
-                phoneSocket = network.getSocketFactory().createSocket();
-                phoneSocket.connect(InetSocketAddress.createUnresolved(ipAddress, 5277), 10000);
-                InputStream phoneInputStream = phoneSocket.getInputStream();
-                OutputStream phoneOutputStream = phoneSocket.getOutputStream();
-
-                Log.d(TAG, "Connected to phone");
-
-                usbToWifiPipe = new Pipe(huInputStream, phoneOutputStream, this);
-                wifiToUSBPipe = new Pipe(phoneInputStream, huOutputStream, this);
-
-                usbToWifiPipe.start();
-                wifiToUSBPipe.start();
-
-                updateNotification("Android auto connected");
-            } catch (Exception e) {
-                Log.d(TAG, "Could not connect", e);
-                cleanup();
-                updateNotification("Could not connect: " + e.getMessage());
+        public Connection(UsbAccessory usbAccessory, Network network, String ipAddress, ErrorListener errorHandler) throws IOException {
+            Log.d(TAG, "Connecting via USB to HU");
+            huFileDescriptor = usbManager.openAccessory(usbAccessory);
+            if (huFileDescriptor == null) {
+                throw new IllegalArgumentException("Accessory not found!");
             }
+            FileDescriptor fileDescriptor = huFileDescriptor.getFileDescriptor();
+            InputStream huInputStream = new FileInputStream(fileDescriptor);
+            OutputStream huOutputStream = new FileOutputStream(fileDescriptor);
+
+            Log.d(TAG, "HU connected, connecting to phone");
+
+            phoneSocket = network.getSocketFactory().createSocket();
+            phoneSocket.connect(InetSocketAddress.createUnresolved(ipAddress, 5277), 10000);
+            InputStream phoneInputStream = phoneSocket.getInputStream();
+            OutputStream phoneOutputStream = phoneSocket.getOutputStream();
+
+            Log.d(TAG, "Connected to phone");
+
+            usbToWifiPipe = new Pipe(huInputStream, phoneOutputStream, errorHandler);
+            wifiToUSBPipe = new Pipe(phoneInputStream, huOutputStream, errorHandler);
+
+            usbToWifiPipe.start();
+            wifiToUSBPipe.start();
         }
 
         @Override
         public void close() {
-            active = false;
-            cleanup();
-            updateNotification("Android auto disconnected");
-        }
-
-        @Override
-        public void onError(final Exception e) {
-            cleanup();
-            if (active) {
-                updateNotification("Connection error: " + e.getMessage());
-            }
-        }
-
-        private void cleanup() {
             closeQuietly(usbToWifiPipe);
             closeQuietly(wifiToUSBPipe);
 
