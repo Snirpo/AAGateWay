@@ -8,7 +8,6 @@ import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
-import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -47,23 +46,17 @@ public class MainActivity extends AppCompatActivity {
         buttonStartService = findViewById(R.id.buttonStartService);
         buttonStopService = findViewById(R.id.buttonStopService);
 
-        buttonStartService.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                saveSettings();
-                Intent serviceIntent = new Intent(MainActivity.this, ConnectionService.class);
-                Toast.makeText(MainActivity.this, "Starting Android Auto proxy", Toast.LENGTH_LONG).show();
-                startService(serviceIntent);
-            }
+        buttonStartService.setOnClickListener(v -> {
+            saveSettings();
+            Intent serviceIntent = new Intent(MainActivity.this, ConnectionService.class);
+            Toast.makeText(MainActivity.this, "Starting Android Auto proxy", Toast.LENGTH_LONG).show();
+            startService(serviceIntent);
         });
 
-        buttonStopService.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                Intent serviceIntent = new Intent(MainActivity.this, ConnectionService.class);
-                Toast.makeText(MainActivity.this, "Stopping Android Auto proxy", Toast.LENGTH_LONG).show();
-                stopService(serviceIntent);
-            }
+        buttonStopService.setOnClickListener(v -> {
+            Intent serviceIntent = new Intent(MainActivity.this, ConnectionService.class);
+            Toast.makeText(MainActivity.this, "Stopping Android Auto proxy", Toast.LENGTH_LONG).show();
+            stopService(serviceIntent);
         });
     }
 
