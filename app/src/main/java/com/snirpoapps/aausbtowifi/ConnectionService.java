@@ -99,7 +99,7 @@ public class ConnectionService extends Service {
                     if (UsbManager.ACTION_USB_ACCESSORY_ATTACHED.equals(intent.getAction())) {
                         return ConnectionState.connected(usbAccessory);
                     } else if (UsbManager.ACTION_USB_ACCESSORY_DETACHED.equals(intent.getAction())
-                            && state.getData().equals(usbAccessory)) {
+                            && usbAccessory.equals(state.getData())) {
                         return ConnectionState.disconnected();
                     }
                     return state;
