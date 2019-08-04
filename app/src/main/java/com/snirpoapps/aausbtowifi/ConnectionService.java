@@ -108,12 +108,12 @@ public class ConnectionService extends Service {
         NetworkRequest.Builder request = new NetworkRequest.Builder();
         request.addTransportType(NetworkCapabilities.TRANSPORT_WIFI);
         Observable<ConnectionState<Network>> network$ = ObservableUtils.observeNetwork(this, request.build())
-                .scan(ConnectionState.disconnected(), (state, connectionState) -> {
-                    if (connectionState.isConnected()) {
+                .map(state -> {
+                    if (state.isConnected()) {
                         String phoneSSID = preferences.getString(Preferences.PHONE_SSID, "");
                         WifiInfo connectionInfo = wifiManager.getConnectionInfo();
                         if (connectionInfo != null && phoneSSID.equals(connectionInfo.getSSID())) {
-                            return ConnectionState.connected(connectionState.getData());
+                            return state;
                         } else {
                             updateNotification("Not connected to phone SSID, please connect to correct SSID");
                         }

@@ -11,6 +11,10 @@ public class ConnectionState<T> {
         this.data = data;
     }
 
+    public ConnectionState<T> clone() {
+        return new ConnectionState<>(connected, data);
+    }
+
     public static <T> ConnectionState<T> connected(T data) {
         return new ConnectionState<>(true, data);
     }
