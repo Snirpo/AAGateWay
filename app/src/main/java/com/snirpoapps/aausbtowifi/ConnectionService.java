@@ -35,10 +35,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.util.concurrent.TimeUnit;
 
 import io.reactivex.Completable;
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.disposables.Disposables;
 import io.reactivex.exceptions.Exceptions;
@@ -187,7 +187,8 @@ public class ConnectionService extends Service {
 
     private Completable createConnection(UsbAccessory usbAccessory, Network network, String ipAddress) {
         return Completable.create(subscriber -> {
-            try (Connection connection = new Connection(usbAccessory, network, ipAddress, subscriber::tryOnError)) {
+            try {
+                Connection connection = new Connection(usbAccessory, network, ipAddress, subscriber::tryOnError);
                 subscriber.setDisposable(Disposables.fromRunnable(() -> {
                     connection.close();
                     updateNotification("Android auto disconnected");
@@ -198,7 +199,7 @@ public class ConnectionService extends Service {
                 updateNotification("Could not connect: " + e.getMessage());
                 throw Exceptions.propagate(e);
             }
-        }).retryWhen(it -> it.delay(10000, TimeUnit.MILLISECONDS));
+        }).onErrorComplete();
     }
 
     private class Connection implements Closeable {
@@ -209,29 +210,25 @@ public class ConnectionService extends Service {
         private Pipe wifiToUSBPipe;
 
         public Connection(UsbAccessory usbAccessory, Network network, String ipAddress, ErrorListener errorHandler) throws IOException {
-            Log.d(TAG, "Connecting via USB to HU");
-            huFileDescriptor = usbManager.openAccessory(usbAccessory);
-            if (huFileDescriptor == null) {
-                throw new IllegalArgumentException("Accessory not found!");
+            try {
+
+
+                phoneSocket = network.getSocketFactory().createSocket();
+                phoneSocket.connect(InetSocketAddress.createUnresolved(ipAddress, 5277), 10000);
+                InputStream phoneInputStream = phoneSocket.getInputStream();
+                OutputStream phoneOutputStream = phoneSocket.getOutputStream();
+
+                Log.d(TAG, "Connected to phone");
+
+                usbToWifiPipe = new Pipe(huInputStream, phoneOutputStream, errorHandler);
+                wifiToUSBPipe = new Pipe(phoneInputStream, huOutputStream, errorHandler);
+
+                usbToWifiPipe.start();
+                wifiToUSBPipe.start();
+            } catch (Exception e) {
+                close();
+                throw e;
             }
-            FileDescriptor fileDescriptor = huFileDescriptor.getFileDescriptor();
-            InputStream huInputStream = new FileInputStream(fileDescriptor);
-            OutputStream huOutputStream = new FileOutputStream(fileDescriptor);
-
-            Log.d(TAG, "HU connected, connecting to phone");
-
-            phoneSocket = network.getSocketFactory().createSocket();
-            phoneSocket.connect(InetSocketAddress.createUnresolved(ipAddress, 5277), 10000);
-            InputStream phoneInputStream = phoneSocket.getInputStream();
-            OutputStream phoneOutputStream = phoneSocket.getOutputStream();
-
-            Log.d(TAG, "Connected to phone");
-
-            usbToWifiPipe = new Pipe(huInputStream, phoneOutputStream, errorHandler);
-            wifiToUSBPipe = new Pipe(phoneInputStream, huOutputStream, errorHandler);
-
-            usbToWifiPipe.start();
-            wifiToUSBPipe.start();
         }
 
         @Override
@@ -244,47 +241,43 @@ public class ConnectionService extends Service {
         }
     }
 
-    private static class Pipe extends Thread implements Closeable {
-        private ErrorListener errorListener;
+    private Completable connectUsb(UsbAccessory usbAccessory) {
+        return Single.using(() -> {
 
-        private InputStream inputStream;
-        private OutputStream outputStream;
-
-        private byte[] buffer = new byte[16384];
-        private volatile boolean running = true;
-
-        public Pipe(InputStream inputStream, OutputStream outputStream, ErrorListener errorListener) {
-            this.inputStream = inputStream;
-            this.outputStream = outputStream;
-            this.errorListener = errorListener;
+        })
+        Log.d(TAG, "Connecting via USB to HU");
+        ParcelFileDescriptor huFileDescriptor = usbManager.openAccessory(usbAccessory);
+        if (huFileDescriptor == null) {
+            throw new IllegalArgumentException("Accessory not found!");
         }
+        FileDescriptor fileDescriptor = huFileDescriptor.getFileDescriptor();
+        InputStream huInputStream = new FileInputStream(fileDescriptor);
+        OutputStream huOutputStream = new FileOutputStream(fileDescriptor);
 
-        @Override
-        public void run() {
+        Log.d(TAG, "HU connected, connecting to phone");
+    }
+
+    private static Completable createPipe(final InputStream inputStream, final OutputStream outputStream) {
+        return Completable.create(emitter -> {
+            emitter.setDisposable(Disposables.fromRunnable(() -> {
+                closeQuietly(inputStream);
+                closeQuietly(outputStream);
+            }));
+
+            byte[] buffer = new byte[16384];
             int read;
             try {
                 Log.d("AAGateway", "Pipe started reading");
-                while (running && (read = inputStream.read(buffer)) > -1) {
+                while (!emitter.isDisposed() && (read = inputStream.read(buffer)) > -1) {
                     outputStream.write(buffer, 0, read);
                     outputStream.flush();
                 }
                 Log.d("AAGateway", "Pipe stopped reading");
             } catch (IOException e) {
                 Log.e("AAGateway", "Pipe error", e);
-                if (running) {
-                    errorListener.onError(e);
-                }
-            } finally {
-                close();
+                emitter.tryOnError(e);
             }
-        }
-
-        @Override
-        public void close() {
-            running = false;
-            closeQuietly(inputStream);
-            closeQuietly(outputStream);
-        }
+        });
     }
 
     private static void closeQuietly(Closeable closeable) {
@@ -294,6 +287,25 @@ public class ConnectionService extends Service {
             } catch (IOException e) {
                 // ignore
             }
+        }
+    }
+
+    private static class Stream implements Closeable {
+        private final InputStream inputStream;
+        private final OutputStream outputStream;
+
+        public Stream(InputStream inputStream, OutputStream outputStream) {
+            this.inputStream = inputStream;
+            this.outputStream = outputStream;
+        }
+
+        public static of
+
+        @Override
+
+        public void close() throws IOException {
+            closeQuietly(inputStream);
+            closeQuietly(outputStream);
         }
     }
 }
