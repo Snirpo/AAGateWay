@@ -85,7 +85,7 @@ public class ConnectionService extends Service {
         startForeground(1, createNotification("Ready"));
 
         IntentFilter usbAccessoryFilter = new IntentFilter();
-        usbAccessoryFilter.addAction(UsbManager.ACTION_USB_ACCESSORY_ATTACHED);
+        usbAccessoryFilter.addAction(UsbManager.ACTION_USB_ACCESSORY_DETACHED);
         Observable<Intent> usbDetached$ = ObservableUtils.registerReceiver(this, usbAccessoryFilter);
         Observable<ConnectionState<UsbAccessory>> usb$ = Observable.merge(usbAttached$, usbDetached$)
                 .scan(ConnectionState.<UsbAccessory>disconnected(), (state, intent) -> {
@@ -159,7 +159,7 @@ public class ConnectionService extends Service {
         if (ACTION_STOP.equals(intent.getAction())) {
             stopForeground(true);
             stopSelf();
-        } else if (intent.hasExtra("accessory")) {
+        } else if (UsbManager.ACTION_USB_ACCESSORY_ATTACHED.equals(intent.getAction())) {
             usbAttached$.onNext(intent);
         }
         return START_STICKY;
