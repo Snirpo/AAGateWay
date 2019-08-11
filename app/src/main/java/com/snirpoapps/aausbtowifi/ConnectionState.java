@@ -1,5 +1,7 @@
 package com.snirpoapps.aausbtowifi;
 
+import java.util.Objects;
+
 public class ConnectionState<T> {
     private static final ConnectionState<?> DISCONNECTED = new ConnectionState<>(false, null);
 
@@ -29,5 +31,19 @@ public class ConnectionState<T> {
 
     public T getData() {
         return data;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        ConnectionState<?> that = (ConnectionState<?>) o;
+        return connected == that.connected &&
+                Objects.equals(data, that.data);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(connected, data);
     }
 }

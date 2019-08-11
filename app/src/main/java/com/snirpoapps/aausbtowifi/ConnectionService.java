@@ -12,7 +12,6 @@ import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.hardware.usb.UsbAccessory;
 import android.hardware.usb.UsbManager;
-import android.net.ConnectivityManager;
 import android.net.DhcpInfo;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -52,7 +51,6 @@ public class ConnectionService extends Service {
     private static final String CHANNEL_ONE_NAME = "Channel One";
 
     private NotificationManager notificationManager;
-    private ConnectivityManager connectivityManager;
     private WifiManager wifiManager;
     private UsbManager usbManager;
     private SharedPreferences preferences;
@@ -69,7 +67,6 @@ public class ConnectionService extends Service {
     public void onCreate() {
         super.onCreate();
 
-        connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
@@ -91,7 +88,7 @@ public class ConnectionService extends Service {
         usbAccessoryFilter.addAction(UsbManager.ACTION_USB_ACCESSORY_ATTACHED);
         Observable<Intent> usbDetached$ = ObservableUtils.registerReceiver(this, usbAccessoryFilter);
         Observable<ConnectionState<UsbAccessory>> usb$ = Observable.merge(usbAttached$, usbDetached$)
-                .scan(ConnectionState.disconnected(), (state, intent) -> {
+                .scan(ConnectionState.<UsbAccessory>disconnected(), (state, intent) -> {
                     UsbAccessory usbAccessory = intent.getParcelableExtra("accessory");
                     if (UsbManager.ACTION_USB_ACCESSORY_ATTACHED.equals(intent.getAction())) {
                         return ConnectionState.connected(usbAccessory);
@@ -100,7 +97,7 @@ public class ConnectionService extends Service {
                         return ConnectionState.disconnected();
                     }
                     return state;
-                });
+                }).distinctUntilChanged();
 
         NetworkRequest.Builder request = new NetworkRequest.Builder();
         request.addTransportType(NetworkCapabilities.TRANSPORT_WIFI);
@@ -109,14 +106,13 @@ public class ConnectionService extends Service {
                     if (state.isConnected()) {
                         String phoneSSID = preferences.getString(Preferences.PHONE_SSID, "");
                         WifiInfo connectionInfo = wifiManager.getConnectionInfo();
-                        if (connectionInfo != null && phoneSSID.equals(connectionInfo.getSSID())) {
+                        if (phoneSSID.equals(connectionInfo.getSSID())) {
                             return state;
-                        } else {
-                            updateNotification("Not connected to phone SSID, please connect to correct SSID");
                         }
+                        updateNotification("Not connected to phone SSID, please connect to correct SSID");
                     }
-                    return ConnectionState.disconnected();
-                });
+                    return ConnectionState.<Network>disconnected();
+                }).distinctUntilChanged();
 
         connectionDisposable = Observable.combineLatest(usb$, network$, Pair::create)
                 .switchMapCompletable(pair -> {
@@ -180,15 +176,12 @@ public class ConnectionService extends Service {
 
     private Completable createConnection(UsbAccessory usbAccessory, Network network, String ipAddress) {
         return Completable.using(
-                () -> {
-                    Connection connection = new Connection(usbAccessory, network, ipAddress);
-                    updateNotification("Android auto connected");
-                    return connection;
-                },
+                () -> new Connection(usbAccessory, network, ipAddress),
                 Connection::start,
                 Connection::close
         )
                 .subscribeOn(Schedulers.io())
+                .doOnSubscribe(it -> updateNotification("Android auto connected"))
                 .doOnComplete(() -> updateNotification("Android auto disconnected"))
                 .doOnError(e -> updateNotification("Could not connect: " + e.getMessage()))
                 .onErrorComplete();
@@ -197,8 +190,8 @@ public class ConnectionService extends Service {
     private class Connection implements Closeable {
         private final ParcelFileDescriptor huFileDescriptor;
         private final Socket phoneSocket;
-        private final FileInputStream huInputStream;
-        private final FileOutputStream huOutputStream;
+        private final InputStream huInputStream;
+        private final OutputStream huOutputStream;
         private final InputStream phoneInputStream;
         private final OutputStream phoneOutputStream;
 

@@ -50,7 +50,7 @@ public class ObservableUtils {
 
             connectivityManager.registerNetworkCallback(networkRequest, networkCallback);
             emitter.setDisposable(Disposables.fromRunnable(() -> connectivityManager.unregisterNetworkCallback(networkCallback)));
-        }).subscribeOn(AndroidSchedulers.mainThread());
+        }).distinctUntilChanged().subscribeOn(AndroidSchedulers.mainThread());
 
 
     }
