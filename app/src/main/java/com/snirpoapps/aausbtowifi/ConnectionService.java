@@ -153,8 +153,8 @@ public class ConnectionService extends Service {
     }
 
     private void updateNotification(String text) {
+        Log.d(TAG, "updateNotification: " + text);
         notificationManager.notify(1, createNotification(text));
-        Log.d(TAG, text);
     }
 
     @Override
@@ -189,7 +189,7 @@ public class ConnectionService extends Service {
                 .doOnSubscribe(it -> updateNotification("Android auto connected"))
                 .doOnComplete(() -> updateNotification("Android auto disconnected"))
                 .doOnError(e -> {
-                    Log.e(TAG, "createConnection", e);
+                    Log.e(TAG, "Connection error: ", e);
                     updateNotification("Could not connect: " + e.getMessage());
                 })
                 .onErrorComplete();
