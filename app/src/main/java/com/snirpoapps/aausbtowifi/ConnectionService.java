@@ -116,15 +116,18 @@ public class ConnectionService extends Service {
 
         connectionDisposable = Observable.combineLatest(usb$, network$, Pair::create)
                 .switchMapCompletable(pair -> {
-                    UsbAccessory usbAccessory = pair.first.getData();
-                    Network phoneNetwork = pair.second.getData();
-                    String phoneIpAddress = preferences.getString(Preferences.PHONE_IP_ADDRESS, null);
-                    if (phoneIpAddress == null || phoneIpAddress.isEmpty()) {
-                        DhcpInfo dhcpInfo = wifiManager.getDhcpInfo();
-                        phoneIpAddress = Utils.intToIp(dhcpInfo.gateway);
+                    if (pair.first.isConnected() && pair.second.isConnected()) {
+                        UsbAccessory usbAccessory = pair.first.getData();
+                        Network phoneNetwork = pair.second.getData();
+                        String phoneIpAddress = preferences.getString(Preferences.PHONE_IP_ADDRESS, null);
+                        if (phoneIpAddress == null || phoneIpAddress.isEmpty()) {
+                            DhcpInfo dhcpInfo = wifiManager.getDhcpInfo();
+                            phoneIpAddress = Utils.intToIp(dhcpInfo.gateway);
+                        }
+                        updateNotification("Setting up Android Auto connection...");
+                        return createConnection(usbAccessory, phoneNetwork, phoneIpAddress);
                     }
-                    updateNotification("Setting up Android Auto connection...");
-                    return createConnection(usbAccessory, phoneNetwork, phoneIpAddress);
+                    return Completable.complete();
                 }).subscribe();
     }
 
