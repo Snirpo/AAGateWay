@@ -13,6 +13,7 @@ public class USBActivity extends AppCompatActivity {
         super.onResume();
         if (UsbManager.ACTION_USB_ACCESSORY_ATTACHED.equals(getIntent().getAction())) {
             Intent serviceIntent = new Intent(this, ConnectionService.class);
+            serviceIntent.setAction(getIntent().getAction());
             serviceIntent.putExtra("accessory", (Parcelable) getIntent().getParcelableExtra("accessory"));
             Toast.makeText(this, "Starting AA proxy service", Toast.LENGTH_LONG).show();
             startService(serviceIntent);

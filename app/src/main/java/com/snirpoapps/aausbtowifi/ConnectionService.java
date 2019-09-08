@@ -87,7 +87,7 @@ public class ConnectionService extends Service {
         IntentFilter usbAccessoryFilter = new IntentFilter();
         usbAccessoryFilter.addAction(UsbManager.ACTION_USB_ACCESSORY_DETACHED);
         Observable<Intent> usbDetached$ = ObservableUtils.registerReceiver(this, usbAccessoryFilter);
-        Observable<ConnectionState<UsbAccessory>> usb$ = Observable.merge(usbAttached$, usbDetached$)
+        Observable<ConnectionState<UsbAccessory>> usb$ = Observable.merge(this.usbAttached$, usbDetached$)
                 .scan(ConnectionState.<UsbAccessory>disconnected(), (state, intent) -> {
                     UsbAccessory usbAccessory = intent.getParcelableExtra("accessory");
                     if (UsbManager.ACTION_USB_ACCESSORY_ATTACHED.equals(intent.getAction())) {
@@ -97,7 +97,7 @@ public class ConnectionService extends Service {
                         return ConnectionState.disconnected();
                     }
                     return state;
-                }).distinctUntilChanged();
+                }).distinctUntilChanged().doOnNext(it -> Log.d(TAG, "USB state changed: " + it));
 
         NetworkRequest.Builder request = new NetworkRequest.Builder();
         request.addTransportType(NetworkCapabilities.TRANSPORT_WIFI);
@@ -112,7 +112,7 @@ public class ConnectionService extends Service {
                         updateNotification("Not connected to phone SSID, please connect to correct SSID");
                     }
                     return ConnectionState.<Network>disconnected();
-                }).distinctUntilChanged();
+                }).distinctUntilChanged().doOnNext(it -> Log.d(TAG, "Network state changed: " + it));
 
         connectionDisposable = Observable.combineLatest(usb$, network$, Pair::create)
                 .switchMapCompletable(pair -> {
@@ -159,6 +159,7 @@ public class ConnectionService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        Log.d(TAG, "onStartCommand: " + intent);
         super.onStartCommand(intent, flags, startId);
         if (ACTION_STOP.equals(intent.getAction())) {
             stopForeground(true);
@@ -250,14 +251,14 @@ public class ConnectionService extends Service {
             byte[] buffer = new byte[16384];
             int read;
             try {
-                Log.d("AAGateway", "Pipe started reading");
+                Log.d(TAG, "Pipe started reading");
                 while (!emitter.isDisposed() && (read = inputStream.read(buffer)) > -1) {
                     outputStream.write(buffer, 0, read);
                     outputStream.flush();
                 }
-                Log.d("AAGateway", "Pipe stopped reading");
+                Log.d(TAG, "Pipe stopped reading");
             } catch (IOException e) {
-                Log.e("AAGateway", "Pipe error", e);
+                Log.e(TAG, "Pipe error", e);
                 emitter.tryOnError(e);
             }
         }).subscribeOn(Schedulers.io());

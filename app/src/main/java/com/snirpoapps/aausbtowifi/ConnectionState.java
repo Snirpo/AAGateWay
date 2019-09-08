@@ -46,4 +46,12 @@ public class ConnectionState<T> {
     public int hashCode() {
         return Objects.hash(connected, data);
     }
+
+    @Override
+    public String toString() {
+        return "ConnectionState{" +
+                "connected=" + connected +
+                ", data=" + data +
+                '}';
+    }
 }
