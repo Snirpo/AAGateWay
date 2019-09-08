@@ -151,6 +151,7 @@ public class ConnectionService extends Service {
 
     private void updateNotification(String text) {
         notificationManager.notify(1, createNotification(text));
+        Log.d(TAG, text);
     }
 
     @Override
@@ -183,7 +184,10 @@ public class ConnectionService extends Service {
                 .subscribeOn(Schedulers.io())
                 .doOnSubscribe(it -> updateNotification("Android auto connected"))
                 .doOnComplete(() -> updateNotification("Android auto disconnected"))
-                .doOnError(e -> updateNotification("Could not connect: " + e.getMessage()))
+                .doOnError(e -> {
+                    Log.e(TAG, "createConnection", e);
+                    updateNotification("Could not connect: " + e.getMessage());
+                })
                 .onErrorComplete();
     }
 
