@@ -32,8 +32,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.util.concurrent.TimeUnit;
 
 import io.reactivex.Completable;
 import io.reactivex.Observable;
@@ -87,7 +87,7 @@ public class ConnectionService extends Service {
         IntentFilter usbAccessoryFilter = new IntentFilter();
         usbAccessoryFilter.addAction(UsbManager.ACTION_USB_ACCESSORY_DETACHED);
         Observable<Intent> usbDetached$ = ObservableUtils.registerReceiver(this, usbAccessoryFilter);
-        Observable<ConnectionState<UsbAccessory>> usb$ = Observable.merge(this.usbAttached$, usbDetached$)
+        Observable<ConnectionState<UsbAccessory>> usb$ = Observable.merge(this.usbAttached$.debounce(5, TimeUnit.SECONDS), usbDetached$)
                 .scan(ConnectionState.<UsbAccessory>disconnected(), (state, intent) -> {
                     UsbAccessory usbAccessory = intent.getParcelableExtra("accessory");
                     if (UsbManager.ACTION_USB_ACCESSORY_ATTACHED.equals(intent.getAction())) {
@@ -216,8 +216,7 @@ public class ConnectionService extends Service {
 
                 Log.d(TAG, "HU connected, connecting to phone");
 
-                phoneSocket = network.getSocketFactory().createSocket();
-                phoneSocket.connect(InetSocketAddress.createUnresolved(ipAddress, 5277), 10000);
+                phoneSocket = network.getSocketFactory().createSocket(ipAddress, 5277);
                 phoneInputStream = phoneSocket.getInputStream();
                 phoneOutputStream = phoneSocket.getOutputStream();
 
