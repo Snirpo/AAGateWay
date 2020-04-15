@@ -257,7 +257,11 @@ public class ConnectionService extends Service {
                 }
                 Log.d(TAG, "Pipe stopped reading");
             } catch (IOException e) {
-                Log.e(TAG, "Pipe error", e);
+                if (emitter.isDisposed()) {
+                    Log.d(TAG, "Pipe stopped reading");
+                } else {
+                    Log.e(TAG, "Pipe error", e);
+                }
                 emitter.tryOnError(e);
             }
         }).subscribeOn(Schedulers.io());
